@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Time-Lock Test</title>
+</head>
+<body>
+    <h1>Time-Lock Encryption Test</h1>
+    <button onclick="testTimeLock()">Test Time-Lock Encryption</button>
+    <div id="results"></div>
+
+    <script type="module">
+        // Copy the crypto functions here for testing
+        const arrayToBase64 = (array) => {
+            let binary = '';
+            for (let i = 0; i < array.length; i++) {
+                binary += String.fromCharCode(array[i]);
+            }
+            return btoa(binary);
+        };
+
+        const base64ToArray = (base64) => {
+            const binary = atob(base64);
+            const array = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                array[i] = binary.charCodeAt(i);
+            }
+            return array;
+        };
+
+        const generateAESKey = () => {
+            const key = new Uint8Array(32);
+            crypto.getRandomValues(key);
+            return arrayToBase64(key);
+        };
+
+        const encryptAES = async (data, keyBase64) => {
+            const key = await crypto.subtle.importKey(
+                'raw',
+                base64ToArray(keyBase64),
+                { name: 'AES-GCM' },
+                false,
+                ['encrypt']
+            );
+
+            const iv = new Uint8Array(12);
+            crypto.getRandomValues(iv);
+
+            const encrypted = await crypto.subtle.encrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                data
+            );
+
+            return {
+                iv: arrayToBase64(iv),
+                encryptedData: arrayToBase64(new Uint8Array(encrypted))
+            };
+        };
+
+        const decryptAES = async (encryptedDataBase64, ivBase64, keyBase64) => {
+            const key = await crypto.subtle.importKey(
+                'raw',
+                base64ToArray(keyBase64),
+                { name: 'AES-GCM' },
+                false,
+                ['decrypt']
+            );
+
+            const iv = base64ToArray(ivBase64);
+            const encryptedData = base64ToArray(encryptedDataBase64);
+
+            const decrypted = await crypto.subtle.decrypt(
+                { name: 'AES-GCM', iv },
+                key,
+                encryptedData
+            );
+
+            return new Uint8Array(decrypted);
+        };
+
+        const generateTimeLockedKey = async (unlockTimestamp, salt) => {
+            const actualAESKey = generateAESKey();
+            
+            const timeData = `${unlockTimestamp}:${salt}`;
+            const encoder = new TextEncoder();
+            const data = encoder.encode(timeData);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const timeSeed = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            
+            const timeKeyHex = timeSeed.substring(0, 64);
+            const timeKeyBytes = new Uint8Array(32);
+            for (let i = 0; i < 32; i++) {
+                timeKeyBytes[i] = parseInt(timeKeyHex.substring(i * 2, i * 2 + 2), 16);
+            }
+            const timeKey = arrayToBase64(timeKeyBytes);
+            
+            const timeLockedKey = await encryptAES(
+                new TextEncoder().encode(actualAESKey),
+                timeKey
+            );
+            
+            return {
+                timeLockedKey: JSON.stringify(timeLockedKey),
+                actualAESKey
+            };
+        };
+
+        const decryptTimeLockedKey = async (timeLockedKeyJson, unlockTimestamp, salt) => {
+            const timeData = `${unlockTimestamp}:${salt}`;
+            const encoder = new TextEncoder();
+            const data = encoder.encode(timeData);
+            const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+            const hashArray = Array.from(new Uint8Array(hashBuffer));
+            const timeSeed = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+            
+            const timeKeyHex = timeSeed.substring(0, 64);
+            const timeKeyBytes = new Uint8Array(32);
+            for (let i = 0; i < 32; i++) {
+                timeKeyBytes[i] = parseInt(timeKeyHex.substring(i * 2, i * 2 + 2), 16);
+            }
+            const timeKey = arrayToBase64(timeKeyBytes);
+            
+            const timeLockedKey = JSON.parse(timeLockedKeyJson);
+            
+            const decryptedData = await decryptAES(
+                timeLockedKey.encryptedData,
+                timeLockedKey.iv,
+                timeKey
+            );
+            
+            return new TextDecoder().decode(decryptedData);
+        };
+
+        window.testTimeLock = async () => {
+            const results = document.getElementById('results');
+            results.innerHTML = '<p>Testing time-lock encryption...</p>';
+            
+            try {
+                // Test parameters
+                const unlockTimestamp = 1766768820; // Same as the failing case
+                const salt = '238kokd6wuhj'; // Same as the failing case
+                
+                console.log('🧪 Testing with exact same parameters:', { unlockTimestamp, salt });
+                
+                // Generate time-locked key
+                const { timeLockedKey, actualAESKey } = await generateTimeLockedKey(unlockTimestamp, salt);
+                
+                console.log('✅ Generated time-locked key:', {
+                    timeLockedKeyLength: timeLockedKey.length,
+                    actualAESKeyLength: actualAESKey.length,
+                    timeLockedKey: timeLockedKey.substring(0, 100) + '...'
+                });
+                
+                // Try to decrypt it
+                const decryptedKey = await decryptTimeLockedKey(timeLockedKey, unlockTimestamp, salt);
+                
+                console.log('✅ Decrypted key:', {
+                    decryptedKeyLength: decryptedKey.length,
+                    keysMatch: decryptedKey === actualAESKey
+                });
+                
+                if (decryptedKey === actualAESKey) {
+                    results.innerHTML = '<p style="color: green;">✅ Time-lock encryption works correctly!</p>';
+                    
+                    // Now test with the EXACT data from the blockchain
+                    const blockchainTimeLockedKey = '{"iv":"eWdOG/RscccHMRPT","encryptedData":"UlU4pWF5IPprsgG/WsI1Zl/pAfP8zCAMtNLsf1y6sipyv/q1QRou2fwGVF"}';
+                    
+                    console.log('🔍 Testing blockchain data...');
+                    try {
+                        const blockchainDecrypted = await decryptTimeLockedKey(blockchainTimeLockedKey, unlockTimestamp, salt);
+                        console.log('✅ Blockchain key decrypted successfully:', blockchainDecrypted.length);
+                        results.innerHTML += '<p style="color: green;">✅ Blockchain data also works!</p>';
+                    } catch (blockchainError) {
+                        console.error('❌ Blockchain data failed:', blockchainError);
+                        results.innerHTML += '<p style="color: red;">❌ Blockchain data failed: ' + blockchainError.message + '</p>';
+                    }
+                } else {
+                    results.innerHTML = '<p style="color: red;">❌ Keys do not match!</p>';
+                }
+                
+            } catch (error) {
+                console.error('❌ Test failed:', error);
+                results.innerHTML = '<p style="color: red;">❌ Test failed: ' + error.message + '</p>';
+            }
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "network": "sepolia",
+  "contractName": "ExamRegistry",
+  "contractAddress": "0xa577F1767cCf9e209684d8ced928e26120bb0293",
+  "etherscanUrl": "https://sepolia.etherscan.io/address/0xa577F1767cCf9e209684d8ced928e26120bb0293",
+  "deploymentDate": "2025-01-26",
+  "compiler": "0.8.20",
+  "verified": false,
+  "deployer": "0x93111875c8A3E1243d3144701a8a576020e91904", 
+  "version": "3.0.0-time-locked-fixed",
+  "features": [
+    "Fixed time-locked encryption system",
+    "Authority creates proper time-locked keys during scheduling",
+    "Teacher uploads with raw AES keys",
+    "Authority converts to time-locked during scheduling",
+    "Zero-trust architecture maintained",
+    "Proper unlock timestamp coordination"
+  ]
+}
