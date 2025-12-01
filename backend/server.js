@@ -2,21 +2,14 @@ const express = require('express');
 const mongoose = require('mongoose');
 const dotenv = require('dotenv');
 const cors = require('cors');
-const cookieParser = require('cookie-parser');
 
 // Try to load from .env or .env.local
 dotenv.config(); 
 dotenv.config({ path: '.env.local' });
 
 const app = express();
-
-// Middleware
-app.use(cors({
-  origin: 'http://localhost:5173', // Frontend URL
-  credentials: true // Allow cookies
-}));
+app.use(cors());
 app.use(express.json());
-app.use(cookieParser());
 
 const PORT = process.env.PORT || 5000;
 const MONGO_URI = process.env.MONGO_URI;
@@ -35,13 +28,10 @@ const connectDB = async () => {
     }
 };
 
-// Routes
+// Test Route
 app.get('/', (req, res) => {
     res.send('ChainSeal Backend is Running');
 });
-
-// Mount auth routes
-app.use('/api/auth', require('./routes/auth'));
 
 // Start Server
 connectDB().then(() => {
