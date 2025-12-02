@@ -14,8 +14,6 @@ router.post('/nonce', async (req, res) => {
   try {
     const { walletAddress } = req.body;
 
-    console.log('Nonce request received for:', walletAddress);
-
     if (!walletAddress) {
       return res.status(400).json({
         success: false,
@@ -26,24 +24,16 @@ router.post('/nonce', async (req, res) => {
     // Find or create user
     let user = await User.findOne({ walletAddress: walletAddress.toLowerCase() });
 
-    console.log('User found:', user ? 'yes' : 'no');
-
     if (!user) {
       // Create new user with temporary role (will be set during profile completion)
-      console.log('Creating new user...');
       user = await User.create({
         walletAddress: walletAddress.toLowerCase(),
-        role: 'teacher', // Temporary default, will be updated in complete-profile
-        nonce: require('crypto').randomBytes(16).toString('hex'),
-        updatedAt: Date.now()
+        role: 'teacher' // Temporary default, will be updated in complete-profile
       });
-      console.log('User created successfully');
     } else {
       // Generate new nonce for existing user
-      console.log('Generating new nonce for existing user...');
       user.generateNonce();
       await user.save();
-      console.log('Nonce updated successfully');
     }
 
     res.status(200).json({
@@ -56,11 +46,9 @@ router.post('/nonce', async (req, res) => {
     });
   } catch (error) {
     console.error('Nonce generation error:', error);
-    console.error('Error stack:', error.stack);
     res.status(500).json({
       success: false,
-      message: 'Server error',
-      error: error.message
+      message: 'Server error'
     });
   }
 });
