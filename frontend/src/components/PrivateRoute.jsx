@@ -1,8 +1,9 @@
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
-const PrivateRoute = ({ children, roles = [] }) => {
+const PrivateRoute = ({ children, roles = [], requireCompleteProfile = true }) => {
   const { isAuthenticated, user, loading } = useAuth();
+  const location = useLocation();
 
   if (loading) {
     return (
@@ -19,8 +20,8 @@ const PrivateRoute = ({ children, roles = [] }) => {
     return <Navigate to="/login" replace />;
   }
 
-  // Check if profile is complete
-  if (user && !user.isProfileComplete) {
+  // Check if profile is complete (skip this check for complete-profile page)
+  if (requireCompleteProfile && user && !user.isProfileComplete && location.pathname !== '/complete-profile') {
     return <Navigate to="/complete-profile" replace />;
   }
 

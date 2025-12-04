@@ -29,8 +29,7 @@ const UserSchema = new mongoose.Schema({
     required: [true, 'Role is required']
   },
   nonce: {
-    type: String,
-    default: () => crypto.randomBytes(16).toString('hex')
+    type: String
   },
   isProfileComplete: {
     type: Boolean,
@@ -46,11 +45,17 @@ const UserSchema = new mongoose.Schema({
   }
 });
 
-// Update the updatedAt timestamp before saving
-UserSchema.pre('save', function(next) {
-  this.updatedAt = Date.now();
-  next();
-});
+// TEMPORARILY DISABLED FOR TESTING
+// UserSchema.pre('save', function(next) {
+//   this.updatedAt = Date.now();
+  
+//   // Generate nonce if it doesn't exist
+//   if (!this.nonce) {
+//     this.nonce = crypto.randomBytes(16).toString('hex');
+//   }
+  
+//   next();
+// });
 
 // Generate a new nonce for the user
 UserSchema.methods.generateNonce = function() {

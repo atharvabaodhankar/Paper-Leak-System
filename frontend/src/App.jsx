@@ -20,7 +20,7 @@ function App() {
             <Route
               path="/complete-profile"
               element={
-                <PrivateRoute>
+                <PrivateRoute requireCompleteProfile={false}>
                   <CompleteProfile />
                 </PrivateRoute>
               }
