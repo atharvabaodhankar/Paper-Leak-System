@@ -48,14 +48,6 @@ const TeacherDashboard = () => {
         <div>
           <h2 className="text-2xl font-bold">Your Question Papers</h2>
           <p className="text-[hsl(var(--color-text-secondary))]">Upload and manage your encrypted exam papers</p>
-          <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mt-2 text-sm">
-            <div className="flex items-center gap-2 text-green-400 font-semibold mb-1">
-              🔒 Complete Zero-Trust Security
-            </div>
-            <p className="text-green-300 text-xs">
-              Once uploaded, even you (the Teacher) cannot decrypt your own papers. Only Exam Centers can access them at the scheduled time.
-            </p>
-          </div>
         </div>
         <button 
           onClick={() => setShowUpload(!showUpload)} 
