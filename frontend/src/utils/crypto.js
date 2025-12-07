@@ -3,13 +3,40 @@
  */
 
 /**
+ * Convert Uint8Array to base64 string safely (handles large arrays)
+ * @param {Uint8Array} array 
+ * @returns {string}
+ */
+const arrayToBase64 = (array) => {
+  let binary = '';
+  for (let i = 0; i < array.length; i++) {
+    binary += String.fromCharCode(array[i]);
+  }
+  return btoa(binary);
+};
+
+/**
+ * Convert base64 string to Uint8Array safely
+ * @param {string} base64 
+ * @returns {Uint8Array}
+ */
+const base64ToArray = (base64) => {
+  const binary = atob(base64);
+  const array = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) {
+    array[i] = binary.charCodeAt(i);
+  }
+  return array;
+};
+
+/**
  * Generate a random AES key
  * @returns {string} Base64 encoded key
  */
 export const generateAESKey = () => {
   const key = new Uint8Array(32); // 256-bit key
   crypto.getRandomValues(key);
-  return btoa(String.fromCharCode(...key));
+  return arrayToBase64(key);
 };
 
 /**
@@ -21,7 +48,7 @@ export const generateAESKey = () => {
 export const encryptAES = async (data, keyBase64) => {
   const key = await crypto.subtle.importKey(
     'raw',
-    Uint8Array.from(atob(keyBase64), c => c.charCodeAt(0)),
+    base64ToArray(keyBase64),
     { name: 'AES-GCM' },
     false,
     ['encrypt']
@@ -37,8 +64,8 @@ export const encryptAES = async (data, keyBase64) => {
   );
 
   return {
-    iv: btoa(String.fromCharCode(...iv)),
-    encryptedData: btoa(String.fromCharCode(...new Uint8Array(encrypted)))
+    iv: arrayToBase64(iv),
+    encryptedData: arrayToBase64(new Uint8Array(encrypted))
   };
 };
 
@@ -52,14 +79,14 @@ export const encryptAES = async (data, keyBase64) => {
 export const decryptAES = async (encryptedDataBase64, ivBase64, keyBase64) => {
   const key = await crypto.subtle.importKey(
     'raw',
-    Uint8Array.from(atob(keyBase64), c => c.charCodeAt(0)),
+    base64ToArray(keyBase64),
     { name: 'AES-GCM' },
     false,
     ['decrypt']
   );
 
-  const iv = Uint8Array.from(atob(ivBase64), c => c.charCodeAt(0));
-  const encryptedData = Uint8Array.from(atob(encryptedDataBase64), c => c.charCodeAt(0));
+  const iv = base64ToArray(ivBase64);
+  const encryptedData = base64ToArray(encryptedDataBase64);
 
   const decrypted = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv },
