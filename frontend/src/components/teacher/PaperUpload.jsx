@@ -3,11 +3,13 @@ import { processPDF } from '../../utils/pdf/processor';
 import { uploadToIPFS } from '../../services/pinata';
 import { useWeb3 } from '../../context/Web3Context';
 import { ethers } from 'ethers';
+import { encryptWithPublicKey } from '../../utils/crypto';
 
 const PaperUpload = ({ onUploadSuccess }) => {
   const [file, setFile] = useState(null);
   const [examName, setExamName] = useState('');
   const [subject, setSubject] = useState('');
+  const [examCenter, setExamCenter] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const { contract } = useWeb3();
@@ -23,7 +25,7 @@ const PaperUpload = ({ onUploadSuccess }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!file || !examName || !subject) return;
+    if (!file || !examName || !subject || !examCenter) return;
 
     if (!contract) {
       alert('Contract not initialized. Please connect your wallet.');
@@ -45,17 +47,26 @@ const PaperUpload = ({ onUploadSuccess }) => {
         setStatus(`Uploaded chunk ${i + 1}/${chunks.length}...`);
       }
 
-      setStatus('Submitting to Blockchain...');
+      setStatus('Fetching Exam Center Public Key...');
+      const pkBytes = await contract.getExamCenterPublicKey(examCenter);
       
-      // For now, we store the AES key as is for testing, 
-      // but in production it should be encrypted with Authority's public key
-      const aesKeyBytes = ethers.utils.toUtf8Bytes(aesKey);
+      if (!pkBytes || pkBytes === '0x') {
+        throw new Error('This address has not registered a public key as an Exam Center.');
+      }
+
+      const publicKeyPem = new TextDecoder().decode(ethers.utils.arrayify(pkBytes));
+      
+      setStatus('Encrypting AES Key with Center Public Key...');
+      const encryptedKeyBase64 = encryptWithPublicKey(aesKey, publicKeyPem);
+      const encryptedKeyBytes = ethers.utils.toUtf8Bytes(encryptedKeyBase64);
+
+      setStatus('Submitting to Blockchain...');
       
       const tx = await contract.uploadPaper(
         examName,
         subject,
         ipfsCIDs,
-        aesKeyBytes
+        encryptedKeyBytes
       );
       
       setStatus('Waiting for block confirmation...');
@@ -101,6 +112,21 @@ const PaperUpload = ({ onUploadSuccess }) => {
             disabled={loading}
             required
           />
+        </div>
+        <div>
+          <label className="block text-sm font-medium mb-1">Target Exam Center Address</label>
+          <input
+            type="text"
+            className="input-field font-mono text-sm"
+            placeholder="0x..."
+            value={examCenter}
+            onChange={(e) => setExamCenter(e.target.value)}
+            disabled={loading}
+            required
+          />
+          <p className="text-[10px] text-[hsl(var(--color-text-muted))] mt-1">
+            Only this center's private key can decrypt the paper.
+          </p>
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Select PDF Paper</label>
