@@ -11,11 +11,13 @@ const ExamCenterDashboard = () => {
   const [keyStatus, setKeyStatus] = useState('Checking security keys...');
   const [downloadingId, setDownloadingId] = useState(null);
   const [status, setStatus] = useState('');
+  const [centerName, setCenterName] = useState('');
+  const [showNamePrompt, setShowNamePrompt] = useState(false);
 
-  // Auto-generate keys on mount/account change
+  // Auto-generate keys and register center on mount/account change
   useEffect(() => {
     const checkAndGenerateKeys = async () => {
-      if (!account) return;
+      if (!account || !contract) return;
 
       const privKey = localStorage.getItem(`chainseal_priv_${account}`);
       const pubKey = localStorage.getItem(`chainseal_pub_${account}`);
@@ -26,18 +28,56 @@ const ExamCenterDashboard = () => {
           const keys = await generateKeyPair();
           localStorage.setItem(`chainseal_priv_${account}`, keys.privateKey);
           localStorage.setItem(`chainseal_pub_${account}`, keys.publicKey);
-          setKeyStatus(''); // Done
+          
+          // Check if center is registered
+          const centerInfo = await contract.centers(account);
+          if (!centerInfo.isRegistered) {
+            setKeyStatus('');
+            setShowNamePrompt(true);
+          } else {
+            setKeyStatus('');
+          }
         } catch (error) {
           console.error("Key generation failed:", error);
           setKeyStatus('Error initializing security. Please reload.');
         }
       } else {
-        setKeyStatus(''); // Keys exist
+        // Check if center is registered
+        try {
+          const centerInfo = await contract.centers(account);
+          if (!centerInfo.isRegistered) {
+            setShowNamePrompt(true);
+          }
+          setKeyStatus('');
+        } catch (error) {
+          console.error("Error checking registration:", error);
+          setKeyStatus('');
+        }
       }
     };
 
     checkAndGenerateKeys();
-  }, [account]);
+  }, [account, contract]);
+
+  const handleRegisterCenter = async () => {
+    if (!centerName.trim()) {
+      alert('Please enter a center name');
+      return;
+    }
+
+    try {
+      setStatus('Registering center on blockchain...');
+      const pubKey = localStorage.getItem(`chainseal_pub_${account}`);
+      const tx = await contract.registerExamCenter(centerName, ethers.utils.toUtf8Bytes(pubKey));
+      await tx.wait();
+      setStatus('Center registered successfully!');
+      setShowNamePrompt(false);
+      setTimeout(() => setStatus(''), 3000);
+    } catch (error) {
+      console.error('Registration failed:', error);
+      setStatus(`Error: ${error.reason || error.message}`);
+    }
+  };
 
   const fetchPapers = async () => {
     if (!contract) return;
@@ -45,11 +85,19 @@ const ExamCenterDashboard = () => {
       setLoading(true);
       const count = await contract.paperCount();
       const fetchedPapers = [];
+      
       for (let i = 1; i <= count.toNumber(); i++) {
         const paper = await contract.getPaper(i);
-        // Only show scheduled papers to the center
-        if (paper.isScheduled) {
-          fetchedPapers.push({ id: i, ...paper });
+        
+        // Check if this center has access to this paper
+        const myKey = await contract.getMyPaperKey(i);
+        if (myKey && myKey.length > 0 && paper.isScheduled) {
+          const myClassroom = await contract.getMyClassroom(i);
+          fetchedPapers.push({ 
+            id: i, 
+            ...paper,
+            roomNumber: myClassroom
+          });
         }
       }
       setPapers(fetchedPapers.reverse());
@@ -61,8 +109,10 @@ const ExamCenterDashboard = () => {
   };
 
   useEffect(() => {
-    fetchPapers();
-  }, [contract]);
+    if (!showNamePrompt) {
+      fetchPapers();
+    }
+  }, [contract, showNamePrompt]);
 
   const handleDownload = async (paper) => {
     const privKey = localStorage.getItem(`chainseal_priv_${account}`);
@@ -73,9 +123,10 @@ const ExamCenterDashboard = () => {
 
     try {
       setDownloadingId(paper.id);
-      setStatus('Decrypting AES Key...');
+      setStatus('Fetching your encrypted key...');
       
-      const encryptedKeyBase64 = ethers.utils.toUtf8String(paper.encryptedKey);
+      const encryptedKeyBytes = await contract.getMyPaperKey(paper.id);
+      const encryptedKeyBase64 = ethers.utils.toUtf8String(encryptedKeyBytes);
       
       setStatus('Fetching chunks and reassembling PDF...');
       const pdfBlob = await reassemblePDF(paper.ipfsCIDs, encryptedKeyBase64, privKey);
@@ -112,6 +163,29 @@ const ExamCenterDashboard = () => {
     }
   };
 
+  if (showNamePrompt) {
+    return (
+      <div className="max-w-md mx-auto mt-20">
+        <div className="glass-card p-8">
+          <h2 className="text-2xl font-bold mb-4">Register Your Exam Center</h2>
+          <p className="text-[hsl(var(--color-text-secondary))] mb-6">
+            Please enter a name for your exam center. This will be visible to the Exam Authority.
+          </p>
+          <input
+            type="text"
+            value={centerName}
+            onChange={(e) => setCenterName(e.target.value)}
+            placeholder="e.g., City High School"
+            className="w-full px-4 py-2 bg-[hsl(var(--color-bg-secondary))] border border-[hsl(var(--color-border))] rounded-lg mb-4"
+          />
+          <button onClick={handleRegisterCenter} className="btn-primary w-full">
+            Register Center
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Key Generation Status / Error */}
@@ -143,7 +217,7 @@ const ExamCenterDashboard = () => {
           </div>
         ) : papers.length === 0 ? (
           <div className="p-12 text-center opacity-50">
-            <p>No scheduled papers found on the network.</p>
+            <p>No papers have been assigned to your center yet.</p>
           </div>
         ) : (
           <div className="divide-y divide-white/5">

@@ -9,7 +9,6 @@ const PaperUpload = ({ onUploadSuccess }) => {
   const [file, setFile] = useState(null);
   const [examName, setExamName] = useState('');
   const [subject, setSubject] = useState('');
-  const [examCenter, setExamCenter] = useState('');
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState('');
   const { contract } = useWeb3();
@@ -25,7 +24,7 @@ const PaperUpload = ({ onUploadSuccess }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!file || !examName || !subject || !examCenter) return;
+    if (!file || !examName || !subject) return;
 
     if (!contract) {
       alert('Contract not initialized. Please connect your wallet.');
@@ -47,16 +46,16 @@ const PaperUpload = ({ onUploadSuccess }) => {
         setStatus(`Uploaded chunk ${i + 1}/${chunks.length}...`);
       }
 
-      setStatus('Fetching Exam Center Public Key...');
-      const pkBytes = await contract.getExamCenterPublicKey(examCenter);
+      setStatus('Fetching Authority Public Key...');
+      const authorityPkBytes = await contract.authorityPublicKey();
       
-      if (!pkBytes || pkBytes === '0x') {
-        throw new Error('This address has not registered a public key as an Exam Center.');
+      if (!authorityPkBytes || authorityPkBytes === '0x') {
+        throw new Error('Authority has not registered a public key yet. Please contact the administrator.');
       }
 
-      const publicKeyPem = new TextDecoder().decode(ethers.utils.arrayify(pkBytes));
+      const publicKeyPem = new TextDecoder().decode(ethers.utils.arrayify(authorityPkBytes));
       
-      setStatus('Encrypting AES Key with Center Public Key...');
+      setStatus('Encrypting AES Key for Authority...');
       const encryptedKeyBase64 = encryptWithPublicKey(aesKey, publicKeyPem);
       const encryptedKeyBytes = ethers.utils.toUtf8Bytes(encryptedKeyBase64);
 
@@ -112,21 +111,6 @@ const PaperUpload = ({ onUploadSuccess }) => {
             disabled={loading}
             required
           />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Target Exam Center Address</label>
-          <input
-            type="text"
-            className="input-field font-mono text-sm"
-            placeholder="0x..."
-            value={examCenter}
-            onChange={(e) => setExamCenter(e.target.value)}
-            disabled={loading}
-            required
-          />
-          <p className="text-[10px] text-[hsl(var(--color-text-muted))] mt-1">
-            Only this center's private key can decrypt the paper.
-          </p>
         </div>
         <div>
           <label className="block text-sm font-medium mb-1">Select PDF Paper</label>

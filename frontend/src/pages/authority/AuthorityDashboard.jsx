@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { useWeb3 } from '../../context/Web3Context';
 import ScheduleExamModal from '../../components/authority/ScheduleExamModal';
+import { generateKeyPair } from '../../utils/crypto';
+import { ethers } from 'ethers';
 
 const AuthorityDashboard = () => {
   const { contract, account } = useWeb3();
@@ -8,6 +10,7 @@ const AuthorityDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState(null);
   const [txStatus, setTxStatus] = useState('');
+  const [keyStatus, setKeyStatus] = useState('Checking authority keys...');
 
   const fetchAllPapers = async () => {
     if (!contract) return;
@@ -38,13 +41,40 @@ const AuthorityDashboard = () => {
   };
 
   useEffect(() => {
-    fetchAllPapers();
-  }, [contract]);
+    const checkAndGenerateKeys = async () => {
+      if (!account || !contract) return;
 
-  const handleSchedule = async (paperId, unlockTimestamp, roomNumber) => {
+      const privKey = localStorage.getItem(`chainseal_priv_${account}`);
+      const pubKey = localStorage.getItem(`chainseal_pub_${account}`);
+
+      if (!privKey || !pubKey) {
+        setKeyStatus('Initializing authority keys...');
+        try {
+          const keys = await generateKeyPair();
+          localStorage.setItem(`chainseal_priv_${account}`, keys.privateKey);
+          localStorage.setItem(`chainseal_pub_${account}`, keys.publicKey);
+          
+          // Register authority public key
+          const tx = await contract.registerAuthority(ethers.utils.toUtf8Bytes(keys.publicKey));
+          await tx.wait();
+          setKeyStatus('');
+        } catch (error) {
+          console.error("Key generation failed:", error);
+          setKeyStatus('Error initializing keys. Please reload.');
+        }
+      } else {
+        setKeyStatus('');
+      }
+    };
+
+    checkAndGenerateKeys();
+    fetchAllPapers();
+  }, [contract, account]);
+
+  const handleSchedule = async (paperId, unlockTimestamp, centers, classrooms, encryptedKeys) => {
     try {
       setTxStatus('Initiating transaction...');
-      const tx = await contract.scheduleExam(paperId, unlockTimestamp, roomNumber);
+      const tx = await contract.scheduleExam(paperId, unlockTimestamp, centers, classrooms, encryptedKeys);
       
       setTxStatus('Waiting for blockchain confirmation...');
       await tx.wait();
@@ -69,6 +99,12 @@ const AuthorityDashboard = () => {
 
   return (
     <div className="space-y-8">
+      {keyStatus && (
+        <div className="glass-card p-4 flex items-center justify-center gap-3 bg-blue-500/10 border-blue-500/20 text-blue-400">
+          <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
+          {keyStatus}
+        </div>
+      )}
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Exam Authority Dashboard</h2>

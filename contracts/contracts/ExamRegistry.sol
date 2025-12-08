@@ -3,7 +3,7 @@ pragma solidity ^0.8.20;
 
 /**
  * @title ExamRegistry
- * @dev Manages exam paper uploads, scheduling, and time-locked access
+ * @dev Manages exam paper uploads, scheduling, and time-locked access with multi-center support
  */
 contract ExamRegistry {
     struct Paper {
@@ -11,71 +11,68 @@ contract ExamRegistry {
         string subject;
         address teacher;
         string[] ipfsCIDs;        // Encrypted chunks on IPFS
-        bytes encryptedKey;       // AES key encrypted with exam center's public key
         uint256 uploadTimestamp;
         uint256 unlockTimestamp;
-        string roomNumber;
         bool isScheduled;
         bool isUnlocked;
         address authority;        // Who scheduled it
+        bytes authorityEncryptedKey; // Key encrypted for the Authority (master key)
+    }
+
+    struct Center {
+        string name;
+        bytes publicKey;
+        bool isRegistered;
     }
     
     // State variables
     mapping(uint256 => Paper) public papers;
     uint256 public paperCount;
     
-    // Exam center public keys (registered during onboarding)
-    mapping(address => bytes) public examCenterPublicKeys;
+    // Registry
+    mapping(address => Center) public centers;
+    address[] public centerAddresses; // To enumerate centers
+
+    // Authority Registry (Simplification: only one authority for now or allow multiple)
+    bytes public authorityPublicKey;
+    
+    // Per-paper access controls
+    // paperId => centerAddress => roomNumber
+    mapping(uint256 => mapping(address => string)) public paperClassrooms;
+    // paperId => centerAddress => encryptedKey (AES key encrypted with Center's RSA Key)
+    mapping(uint256 => mapping(address => bytes)) public paperKeys;
     
     // Events
-    event PaperUploaded(
-        uint256 indexed paperId,
-        string examName,
-        address indexed teacher,
-        uint256 timestamp
-    );
+    event PaperUploaded(uint256 indexed paperId, string examName, address indexed teacher);
+    event PaperScheduled(uint256 indexed paperId, uint256 unlockTimestamp, address indexed authority);
+    event PaperUnlocked(uint256 indexed paperId, uint256 timestamp);
+    event CenterRegistered(address indexed centerAddress, string name);
+    event AuthorityRegistered(address indexed authority, bytes publicKey);
     
-    event PaperScheduled(
-        uint256 indexed paperId,
-        uint256 unlockTimestamp,
-        string roomNumber,
-        address indexed authority
-    );
-    
-    event PaperUnlocked(
-        uint256 indexed paperId,
-        string roomNumber,
-        uint256 timestamp
-    );
-    
-    event ExamCenterRegistered(
-        address indexed examCenter,
-        uint256 timestamp
-    );
-    
-    // Modifiers
     modifier validPaper(uint256 _paperId) {
         require(_paperId > 0 && _paperId <= paperCount, "Invalid paper ID");
         _;
     }
     
     /**
-     * @dev Teacher uploads a paper
-     * @param _examName Name of the exam
-     * @param _subject Subject of the exam
-     * @param _ipfsCIDs Array of IPFS CIDs for encrypted chunks
-     * @param _encryptedKey AES key encrypted with exam center's public key
-     * @return paperId The ID of the uploaded paper
+     * @dev Register the Authority's Public Key (so teachers can encrypt for them)
+     */
+    function registerAuthority(bytes memory _publicKey) external {
+        authorityPublicKey = _publicKey;
+        emit AuthorityRegistered(msg.sender, _publicKey);
+    }
+
+    /**
+     * @dev Teacher uploads a paper, encrypting the key for the Authority
      */
     function uploadPaper(
         string memory _examName,
         string memory _subject,
         string[] memory _ipfsCIDs,
-        bytes memory _encryptedKey
+        bytes memory _authorityEncryptedKey
     ) external returns (uint256) {
         require(bytes(_examName).length > 0, "Exam name required");
-        require(_ipfsCIDs.length > 0, "At least one IPFS CID required");
-        require(_encryptedKey.length > 0, "Encrypted key required");
+        require(bytes(authorityPublicKey).length > 0, "Authority not registered yet");
         
         paperCount++;
         
@@ -84,105 +81,109 @@ contract ExamRegistry {
             subject: _subject,
             teacher: msg.sender,
             ipfsCIDs: _ipfsCIDs,
-            encryptedKey: _encryptedKey,
             uploadTimestamp: block.timestamp,
             unlockTimestamp: 0,
-            roomNumber: "",
             isScheduled: false,
             isUnlocked: false,
-            authority: address(0)
+            authority: address(0),
+            authorityEncryptedKey: _authorityEncryptedKey
         });
         
-        emit PaperUploaded(paperCount, _examName, msg.sender, block.timestamp);
+        emit PaperUploaded(paperCount, _examName, msg.sender);
         return paperCount;
     }
     
     /**
-     * @dev Authority schedules an exam
-     * @param _paperId ID of the paper to schedule
-     * @param _unlockTimestamp When the paper should unlock (Unix timestamp)
-     * @param _roomNumber Room where exam will be conducted
+     * @dev Authority schedules an exam for specific centers
      */
     function scheduleExam(
         uint256 _paperId,
         uint256 _unlockTimestamp,
-        string memory _roomNumber
+        address[] memory _centers,
+        string[] memory _classrooms,
+        bytes[] memory _encryptedKeys
     ) external validPaper(_paperId) {
-        Paper storage paper = papers[_paperId];
-        
-        require(!paper.isScheduled, "Paper already scheduled");
+        require(_centers.length == _classrooms.length, "Centers/Classrooms mismatch");
+        require(_centers.length == _encryptedKeys.length, "Centers/Keys mismatch");
         require(_unlockTimestamp > block.timestamp, "Unlock time must be in future");
-        require(bytes(_roomNumber).length > 0, "Room number required");
+        
+        Paper storage paper = papers[_paperId];
+        require(!paper.isScheduled, "Paper already scheduled");
+        
+        for (uint i = 0; i < _centers.length; i++) {
+            paperClassrooms[_paperId][_centers[i]] = _classrooms[i];
+            paperKeys[_paperId][_centers[i]] = _encryptedKeys[i];
+        }
         
         paper.unlockTimestamp = _unlockTimestamp;
-        paper.roomNumber = _roomNumber;
         paper.isScheduled = true;
         paper.authority = msg.sender;
         
-        emit PaperScheduled(_paperId, _unlockTimestamp, _roomNumber, msg.sender);
+        emit PaperScheduled(_paperId, _unlockTimestamp, msg.sender);
     }
     
     /**
-     * @dev Unlock a paper (can be called by anyone after unlock time)
-     * @param _paperId ID of the paper to unlock
+     * @dev Unlock a paper
      */
     function unlockPaper(uint256 _paperId) external validPaper(_paperId) {
         Paper storage paper = papers[_paperId];
-        
         require(paper.isScheduled, "Paper not scheduled");
-        require(!paper.isUnlocked, "Paper already unlocked");
         require(block.timestamp >= paper.unlockTimestamp, "Too early to unlock");
         
         paper.isUnlocked = true;
-        
-        emit PaperUnlocked(_paperId, paper.roomNumber, block.timestamp);
+        emit PaperUnlocked(_paperId, block.timestamp);
     }
     
     /**
-     * @dev Exam center registers their public key
-     * @param _publicKey Public key for encrypting paper keys
+     * @dev Exam center registers their Name and Public Key
      */
-    function registerExamCenter(bytes memory _publicKey) external {
+    function registerExamCenter(string memory _name, bytes memory _publicKey) external {
+        require(bytes(_name).length > 0, "Name required");
         require(_publicKey.length > 0, "Public key required");
         
-        examCenterPublicKeys[msg.sender] = _publicKey;
+        if (!centers[msg.sender].isRegistered) {
+            centerAddresses.push(msg.sender);
+        }
         
-        emit ExamCenterRegistered(msg.sender, block.timestamp);
+        centers[msg.sender] = Center({
+            name: _name,
+            publicKey: _publicKey,
+            isRegistered: true
+        });
+        
+        emit CenterRegistered(msg.sender, _name);
     }
     
-    /**
-     * @dev Get paper details
-     * @param _paperId ID of the paper
-     * @return Paper struct
-     */
+    // --- Getters ---
+
     function getPaper(uint256 _paperId) external view validPaper(_paperId) returns (Paper memory) {
         return papers[_paperId];
     }
     
-    /**
-     * @dev Get all IPFS CIDs for a paper
-     * @param _paperId ID of the paper
-     * @return Array of IPFS CIDs
-     */
-    function getPaperCIDs(uint256 _paperId) external view validPaper(_paperId) returns (string[] memory) {
-        return papers[_paperId].ipfsCIDs;
+    // Get list of all registered centers (for Authority UI)
+    function getAllCenters() external view returns (address[] memory, string[] memory) {
+        address[] memory addrs = new address[](centerAddresses.length);
+        string[] memory names = new string[](centerAddresses.length);
+        
+        for (uint i = 0; i < centerAddresses.length; i++) {
+            addrs[i] = centerAddresses[i];
+            names[i] = centers[centerAddresses[i]].name;
+        }
+        
+        return (addrs, names);
+    }
+
+    // Get specific key for the caller (Exam Center)
+    function getMyPaperKey(uint256 _paperId) external view validPaper(_paperId) returns (bytes memory) {
+        return paperKeys[_paperId][msg.sender];
     }
     
-    /**
-     * @dev Check if a paper is unlocked
-     * @param _paperId ID of the paper
-     * @return bool indicating if paper is unlocked
-     */
-    function isPaperUnlocked(uint256 _paperId) external view validPaper(_paperId) returns (bool) {
-        return papers[_paperId].isUnlocked;
+    // Get specific classroom for the caller
+    function getMyClassroom(uint256 _paperId) external view validPaper(_paperId) returns (string memory) {
+        return paperClassrooms[_paperId][msg.sender];
     }
     
-    /**
-     * @dev Get exam center's public key
-     * @param _examCenter Address of the exam center
-     * @return Public key bytes
-     */
-    function getExamCenterPublicKey(address _examCenter) external view returns (bytes memory) {
-        return examCenterPublicKeys[_examCenter];
+    function getCenterPublicKey(address _center) external view returns (bytes memory) {
+        return centers[_center].publicKey;
     }
 }
