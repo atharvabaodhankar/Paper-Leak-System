@@ -1,6 +1,7 @@
 /**
- * Crypto utilities for AES encryption/decryption
+ * Crypto utilities for AES and RSA encryption/decryption
  */
+import forge from 'node-forge';
 
 /**
  * Convert Uint8Array to base64 string safely (handles large arrays)
@@ -95,4 +96,55 @@ export const decryptAES = async (encryptedDataBase64, ivBase64, keyBase64) => {
   );
 
   return new Uint8Array(decrypted);
+};
+
+/**
+ * Encrypt a small piece of data (like an AES key) with a public key
+ * @param {string} data - binary string or base64
+ * @param {string} publicKeyPem 
+ * @returns {string} Base64 encoded encrypted data
+ */
+export const encryptWithPublicKey = (data, publicKeyPem) => {
+  const publicKey = forge.pki.publicKeyFromPem(publicKeyPem);
+  const encrypted = publicKey.encrypt(data, 'RSA-OAEP', {
+    md: forge.md.sha256.create(),
+    mgf1: {
+      md: forge.md.sha1.create()
+    }
+  });
+  return forge.util.encode64(encrypted);
+};
+
+/**
+ * Decrypt data with a private key
+ * @param {string} encryptedDataBase64 
+ * @param {string} privateKeyPem 
+ * @returns {string} decrypted string
+ */
+export const decryptWithPrivateKey = (encryptedDataBase64, privateKeyPem) => {
+  const privateKey = forge.pki.privateKeyFromPem(privateKeyPem);
+  const encryptedData = forge.util.decode64(encryptedDataBase64);
+  const decrypted = privateKey.decrypt(encryptedData, 'RSA-OAEP', {
+    md: forge.md.sha256.create(),
+    mgf1: {
+      md: forge.md.sha1.create()
+    }
+  });
+  return decrypted;
+};
+
+/**
+ * Generate a new RSA Key Pair
+ * @returns {Promise<Object>} { publicKey, privateKey } in PEM format
+ */
+export const generateKeyPair = () => {
+  return new Promise((resolve, reject) => {
+    forge.pki.rsa.generateKeyPair({ bits: 2048, workers: 2 }, (err, keypair) => {
+      if (err) return reject(err);
+      resolve({
+        publicKey: forge.pki.publicKeyToPem(keypair.publicKey),
+        privateKey: forge.pki.privateKeyToPem(keypair.privateKey)
+      });
+    });
+  });
 };
