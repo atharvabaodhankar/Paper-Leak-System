@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWeb3 } from '../context/Web3Context';
 import { useAuth } from '../context/AuthContext';
 
@@ -9,12 +9,12 @@ export const useAutoLogin = () => {
   const { account, isConnected } = useWeb3();
   const { loginWithWallet, isAuthenticated, user } = useAuth();
   const previousAccount = useRef(null);
-  const isLoggingIn = useRef(false);
+  const [isAutoLoggingIn, setIsAutoLoggingIn] = useState(false);
 
   useEffect(() => {
     const handleAccountChange = async () => {
       // Skip if no account or already logging in
-      if (!account || !isConnected || isLoggingIn.current) {
+      if (!account || !isConnected || isAutoLoggingIn) {
         return;
       }
 
@@ -32,7 +32,7 @@ export const useAutoLogin = () => {
       console.log('🔄 Account changed, auto-logging in with:', account);
       
       try {
-        isLoggingIn.current = true;
+        setIsAutoLoggingIn(true);
         const result = await loginWithWallet(account);
         
         if (result.success) {
@@ -44,12 +44,12 @@ export const useAutoLogin = () => {
       } catch (error) {
         console.error('❌ Auto-login error:', error);
       } finally {
-        isLoggingIn.current = false;
+        setIsAutoLoggingIn(false);
       }
     };
 
     handleAccountChange();
-  }, [account, isConnected, loginWithWallet, isAuthenticated, user]);
+  }, [account, isConnected, loginWithWallet, isAuthenticated, user, isAutoLoggingIn]);
 
   // Update previous account when user manually logs out
   useEffect(() => {
@@ -59,6 +59,6 @@ export const useAutoLogin = () => {
   }, [isAuthenticated]);
 
   return {
-    isAutoLoggingIn: isLoggingIn.current
+    isAutoLoggingIn
   };
 };

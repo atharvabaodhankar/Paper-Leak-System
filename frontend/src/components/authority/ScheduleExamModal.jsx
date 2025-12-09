@@ -87,11 +87,58 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
         const keys = await generateDeterministicKeyPair(signature);
         authorityPrivKey = keys.privateKey;
         
+        console.log('🔍 Key generation details:', {
+          account,
+          signatureLength: signature.length,
+          privateKeyLength: authorityPrivKey.length,
+          publicKeyLength: keys.publicKey.length
+        });
+        
+        // Get the Authority's public key from blockchain to verify
+        const blockchainPubKey = await contract.authorityPublicKey();
+        const blockchainPubKeyPem = ethers.utils.toUtf8String(blockchainPubKey);
+        
+        console.log('🔍 Key comparison:', {
+          generatedPublicKey: keys.publicKey.substring(0, 100) + '...',
+          blockchainPublicKey: blockchainPubKeyPem.substring(0, 100) + '...',
+          keysMatch: keys.publicKey === blockchainPubKeyPem
+        });
+        
+        if (keys.publicKey !== blockchainPubKeyPem) {
+          throw new Error('Key mismatch: You are not the same Authority who registered the public key. Please use the MetaMask account that originally registered as Authority.');
+        }
+        
+        // Try to decrypt the master AES key
         const encryptedMasterKeyBase64 = ethers.utils.toUtf8String(paper.authorityEncryptedKey);
+        console.log('🔍 Attempting to decrypt master key:', {
+          encryptedKeyLength: encryptedMasterKeyBase64.length,
+          privateKeyLength: authorityPrivKey.length
+        });
+        
         masterAESKey = decryptWithPrivateKey(encryptedMasterKeyBase64, authorityPrivKey);
+        console.log('✅ Successfully decrypted master AES key');
+        
       } catch (error) {
         console.error('Error regenerating encryption keys:', error);
-        alert('Failed to regenerate encryption keys. Please try again.');
+        
+        let errorMessage = `Failed to regenerate encryption keys: ${error.message}\n\n`;
+        
+        if (error.message.includes('Invalid RSAES-OAEP padding')) {
+          errorMessage += `This error indicates a key mismatch. Possible causes:\n\n`;
+          errorMessage += `1. You're not the same Authority who registered the public key\n`;
+          errorMessage += `2. The paper was encrypted with a different Authority's key\n`;
+          errorMessage += `3. You switched MetaMask accounts\n\n`;
+          errorMessage += `Solution: Use the same MetaMask account that originally registered as Authority.`;
+        } else if (error.message.includes('Key mismatch')) {
+          errorMessage += `Please switch to the MetaMask account that originally registered as Authority.`;
+        } else {
+          errorMessage += `Other possible causes:\n`;
+          errorMessage += `1. Authority hasn't registered yet\n`;
+          errorMessage += `2. Paper was uploaded before Authority registration\n`;
+          errorMessage += `3. Network or blockchain connection issues`;
+        }
+        
+        alert(errorMessage);
         setLoading(false);
         return;
       }
@@ -106,8 +153,8 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
         isHex: paper.authorityEncryptedKey?.startsWith?.('0x')
       });
       
-      if (!paper.authorityEncryptedKey || paper.authorityEncryptedKey === '0x' || paper.authorityEncryptedKey.length === 0) {
-        alert('This paper does not have an encrypted key for the Authority. It may have been uploaded with the old system. Please re-upload the paper.');
+      if (!paper.authorityEncryptedKey || paper.authorityEncryptedKey === '0x' || paper.authorityEncryptedKey.length <= 2) {
+        alert('This paper does not have an encrypted key for the Authority. The paper may have been uploaded before Authority registration. Please re-upload the paper.');
         setLoading(false);
         return;
       }

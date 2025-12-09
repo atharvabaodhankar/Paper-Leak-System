@@ -48,40 +48,40 @@ const AuthorityDashboard = () => {
       if (!account || !contract) return;
 
       try {
-        setKeyStatus('Checking authority registration...');
+        setCheckingRegistration(true);
         
-        // Check if already registered on blockchain
-        const authorityPubKey = await contract.authorityPublicKey();
-        const isAlreadyRegistered = authorityPubKey && authorityPubKey !== '0x' && authorityPubKey.length > 0;
+        // Check if Authority is registered
+        const authorityPubKeyBytes = await contract.authorityPublicKey();
         
-        if (isAlreadyRegistered) {
-          setIsRegistered(true);
-          setKeyStatus('');
+        if (!authorityPubKeyBytes || authorityPubKeyBytes === '0x') {
+          setKeyStatus('❌ No Authority registered yet. Click "Register as Authority" to set up your keys.');
+          setIsRegistered(false);
           setCheckingRegistration(false);
           return;
         }
-        
-        // Not registered - need to generate and register keys
-        setKeyStatus('Initializing authority keys...');
-        
-        // Get MetaMask signature for deterministic key generation
+
+        // Generate keys from current account to check if it matches
         const provider = new ethers.providers.Web3Provider(window.ethereum);
         const signer = provider.getSigner();
         const message = `Generate ChainSeal encryption keys for Authority\nAccount: ${account}`;
         const signature = await signer.signMessage(message);
-        
-        // Generate deterministic keys from signature
         const keys = await generateDeterministicKeyPair(signature);
         
-        // Register authority public key on blockchain
-        const tx = await contract.registerAuthority(ethers.utils.toUtf8Bytes(keys.publicKey));
-        await tx.wait();
+        // Compare with registered public key
+        const registeredPubKey = ethers.utils.toUtf8String(authorityPubKeyBytes);
+        const isCurrentAccountAuthority = keys.publicKey === registeredPubKey;
         
-        setKeyStatus('');
-        setIsRegistered(true);
+        if (isCurrentAccountAuthority) {
+          setKeyStatus(`✅ You are the registered Authority (${account.slice(0, 6)}...${account.slice(-4)})`);
+          setIsRegistered(true);
+        } else {
+          setKeyStatus(`⚠️ You are NOT the registered Authority. Switch to the correct MetaMask account to schedule exams.`);
+          setIsRegistered(false);
+        }
+        
       } catch (error) {
-        console.error("Key generation failed:", error);
-        setKeyStatus('Error initializing keys. Please reload.');
+        console.error('Error checking authority status:', error);
+        setKeyStatus(`❌ Error checking authority status: ${error.message}`);
         setIsRegistered(false);
       } finally {
         setCheckingRegistration(false);
@@ -120,31 +120,28 @@ const AuthorityDashboard = () => {
 
   return (
     <div className="space-y-8">
-      {keyStatus && (
-        <div className="glass-card p-4 flex items-center justify-center gap-3 bg-blue-500/10 border-blue-500/20 text-blue-400">
-          <div className="w-4 h-4 border-2 border-blue-400 border-t-transparent rounded-full animate-spin"></div>
-          {keyStatus}
-        </div>
-      )}
-      
-      {/* Registration Status Badge */}
+      {/* Authority Status */}
       <div className="glass-card p-4 mb-4">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className={`w-3 h-3 rounded-full ${isRegistered ? 'bg-green-500' : 'bg-red-500'} ${checkingRegistration ? 'animate-pulse' : ''}`}></div>
+            <div className={`w-3 h-3 rounded-full ${
+              checkingRegistration ? 'bg-yellow-500 animate-pulse' : 
+              isRegistered ? 'bg-green-500' : 'bg-red-500'
+            }`}></div>
             <div>
-              <h3 className="font-semibold text-sm">Authority Registration Status</h3>
+              <h3 className="font-semibold text-sm">Authority Status</h3>
               <p className="text-xs text-[hsl(var(--color-text-secondary))]">
-                {checkingRegistration ? 'Checking blockchain...' : 
-                 isRegistered ? '✅ Registered on Sepolia - Ready to schedule papers' : 
-                 '❌ Not registered - Papers cannot be uploaded yet'}
+                {keyStatus}
               </p>
             </div>
           </div>
           {!isRegistered && !checkingRegistration && (
-            <div className="text-xs text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded">
-              ⚠️ Logout and login again to register
-            </div>
+            <button 
+              onClick={() => window.location.reload()} 
+              className="text-xs text-blue-500 bg-blue-500/10 px-3 py-1 rounded hover:bg-blue-500/20"
+            >
+              🔄 Refresh Status
+            </button>
           )}
         </div>
       </div>
@@ -217,9 +214,15 @@ const AuthorityDashboard = () => {
                     {!paper.isScheduled ? (
                       <button 
                         onClick={() => setSelectedPaper(paper)}
-                        className="btn-primary py-1.5 px-4 text-xs font-bold uppercase tracking-wider"
+                        disabled={!isRegistered || checkingRegistration}
+                        className={`py-1.5 px-4 text-xs font-bold uppercase tracking-wider rounded ${
+                          isRegistered && !checkingRegistration 
+                            ? 'btn-primary' 
+                            : 'bg-gray-500/20 text-gray-500 cursor-not-allowed'
+                        }`}
+                        title={!isRegistered ? 'You must be the registered Authority to schedule papers' : ''}
                       >
-                        Schedule
+                        {checkingRegistration ? 'Checking...' : 'Schedule'}
                       </button>
                     ) : (
                       <span className="text-[10px] text-success font-bold uppercase">Locked 🛡️</span>
