@@ -11,6 +11,8 @@ const AuthorityDashboard = () => {
   const [selectedPaper, setSelectedPaper] = useState(null);
   const [txStatus, setTxStatus] = useState('');
   const [keyStatus, setKeyStatus] = useState('Checking authority keys...');
+  const [isRegistered, setIsRegistered] = useState(false);
+  const [checkingRegistration, setCheckingRegistration] = useState(true);
 
   const fetchAllPapers = async () => {
     if (!contract) return;
@@ -28,8 +30,9 @@ const AuthorityDashboard = () => {
           isScheduled: paper.isScheduled,
           isUnlocked: paper.isUnlocked,
           unlockTimestamp: paper.unlockTimestamp,
-          roomNumber: paper.roomNumber,
-          uploadTimestamp: paper.uploadTimestamp
+          uploadTimestamp: paper.uploadTimestamp,
+          authorityEncryptedKey: paper.authorityEncryptedKey,
+          ipfsCIDs: paper.ipfsCIDs
         });
       }
       setPapers(fetchedPapers.reverse()); // Newest first
@@ -58,12 +61,27 @@ const AuthorityDashboard = () => {
           const tx = await contract.registerAuthority(ethers.utils.toUtf8Bytes(keys.publicKey));
           await tx.wait();
           setKeyStatus('');
+          setIsRegistered(true);
         } catch (error) {
           console.error("Key generation failed:", error);
           setKeyStatus('Error initializing keys. Please reload.');
+          setIsRegistered(false);
         }
       } else {
         setKeyStatus('');
+      }
+      
+      // Check if already registered on blockchain
+      try {
+        setCheckingRegistration(true);
+        const authorityPubKey = await contract.authorityPublicKey();
+        const isReg = authorityPubKey && authorityPubKey !== '0x' && authorityPubKey.length > 0;
+        setIsRegistered(isReg);
+      } catch (error) {
+        console.error('Error checking registration:', error);
+        setIsRegistered(false);
+      } finally {
+        setCheckingRegistration(false);
       }
     };
 
@@ -105,6 +123,29 @@ const AuthorityDashboard = () => {
           {keyStatus}
         </div>
       )}
+      
+      {/* Registration Status Badge */}
+      <div className="glass-card p-4 mb-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className={`w-3 h-3 rounded-full ${isRegistered ? 'bg-green-500' : 'bg-red-500'} ${checkingRegistration ? 'animate-pulse' : ''}`}></div>
+            <div>
+              <h3 className="font-semibold text-sm">Authority Registration Status</h3>
+              <p className="text-xs text-[hsl(var(--color-text-secondary))]">
+                {checkingRegistration ? 'Checking blockchain...' : 
+                 isRegistered ? '✅ Registered on Sepolia - Ready to schedule papers' : 
+                 '❌ Not registered - Papers cannot be uploaded yet'}
+              </p>
+            </div>
+          </div>
+          {!isRegistered && !checkingRegistration && (
+            <div className="text-xs text-yellow-500 bg-yellow-500/10 px-3 py-1 rounded">
+              ⚠️ Logout and login again to register
+            </div>
+          )}
+        </div>
+      </div>
+
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Exam Authority Dashboard</h2>

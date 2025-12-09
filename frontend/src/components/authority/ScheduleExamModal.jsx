@@ -82,6 +82,22 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
         return;
       }
 
+      // Check if paper has authorityEncryptedKey
+      console.log('🔍 DEBUG: Paper data:', {
+        paperId: paper.id,
+        examName: paper.examName,
+        authorityEncryptedKey: paper.authorityEncryptedKey,
+        keyType: typeof paper.authorityEncryptedKey,
+        keyLength: paper.authorityEncryptedKey?.length,
+        isHex: paper.authorityEncryptedKey?.startsWith?.('0x')
+      });
+      
+      if (!paper.authorityEncryptedKey || paper.authorityEncryptedKey === '0x' || paper.authorityEncryptedKey.length === 0) {
+        alert('This paper does not have an encrypted key for the Authority. It may have been uploaded with the old system. Please re-upload the paper.');
+        setLoading(false);
+        return;
+      }
+
       const encryptedMasterKeyBase64 = ethers.utils.toUtf8String(paper.authorityEncryptedKey);
       const masterAESKey = decryptWithPrivateKey(encryptedMasterKeyBase64, authorityPrivKey);
 
@@ -92,6 +108,13 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
 
       for (const center of validCenters) {
         const centerPubKeyBytes = await contract.getCenterPublicKey(center.centerAddress);
+        
+        if (!centerPubKeyBytes || centerPubKeyBytes === '0x' || centerPubKeyBytes.length === 0) {
+          alert(`Center ${center.centerAddress} has not registered a public key yet.`);
+          setLoading(false);
+          return;
+        }
+        
         const centerPubKeyPem = ethers.utils.toUtf8String(centerPubKeyBytes);
         
         const reEncryptedKey = encryptWithPublicKey(masterAESKey, centerPubKeyPem);
