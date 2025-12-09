@@ -43,6 +43,40 @@ const AuthorityDashboard = () => {
     }
   };
 
+  const registerAsAuthority = async () => {
+    if (!contract || !account) return;
+    
+    try {
+      setKeyStatus('🔄 Registering as Authority...');
+      setCheckingRegistration(true);
+      
+      // Generate deterministic keys from MetaMask signature
+      const provider = new ethers.providers.Web3Provider(window.ethereum);
+      const signer = provider.getSigner();
+      const message = `Generate ChainSeal encryption keys for Authority\nAccount: ${account}`;
+      const signature = await signer.signMessage(message);
+      const keys = await generateDeterministicKeyPair(signature);
+      
+      // Register authority public key on blockchain
+      const tx = await contract.registerAuthority(ethers.utils.toUtf8Bytes(keys.publicKey));
+      setKeyStatus('⏳ Waiting for blockchain confirmation...');
+      await tx.wait();
+      
+      // Update status
+      setKeyStatus(`✅ Successfully registered as Authority (${account.slice(0, 6)}...${account.slice(-4)})`);
+      setIsRegistered(true);
+      
+      // Refresh papers since teachers can now upload
+      fetchAllPapers();
+      
+    } catch (error) {
+      console.error('Registration failed:', error);
+      setKeyStatus(`❌ Registration failed: ${error.message}`);
+    } finally {
+      setCheckingRegistration(false);
+    }
+  };
+
   useEffect(() => {
     const checkAndGenerateKeys = async () => {
       if (!account || !contract) return;
@@ -136,12 +170,20 @@ const AuthorityDashboard = () => {
             </div>
           </div>
           {!isRegistered && !checkingRegistration && (
-            <button 
-              onClick={() => window.location.reload()} 
-              className="text-xs text-blue-500 bg-blue-500/10 px-3 py-1 rounded hover:bg-blue-500/20"
-            >
-              🔄 Refresh Status
-            </button>
+            <div className="flex gap-2">
+              <button 
+                onClick={registerAsAuthority}
+                className="text-xs text-green-500 bg-green-500/10 px-3 py-1 rounded hover:bg-green-500/20"
+              >
+                📝 Register as Authority
+              </button>
+              <button 
+                onClick={() => window.location.reload()} 
+                className="text-xs text-blue-500 bg-blue-500/10 px-3 py-1 rounded hover:bg-blue-500/20"
+              >
+                🔄 Refresh Status
+              </button>
+            </div>
           )}
         </div>
       </div>
