@@ -259,6 +259,13 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
         }
         
         try {
+          console.log('🔍 About to encrypt AES key for center:', {
+            centerAddress: center.centerAddress,
+            masterAESKeyType: typeof masterAESKey,
+            masterAESKeyLength: masterAESKey?.length,
+            masterAESKeyPreview: masterAESKey?.substring?.(0, 20) + '...'
+          });
+          
           const reEncryptedKey = encryptWithPublicKey(masterAESKey, centerPubKeyPem);
           
           centerAddresses.push(center.centerAddress);

@@ -105,14 +105,39 @@ export const decryptAES = async (encryptedDataBase64, ivBase64, keyBase64) => {
  * @returns {string} Base64 encoded encrypted data
  */
 export const encryptWithPublicKey = (data, publicKeyPem) => {
-  const publicKey = forge.pki.publicKeyFromPem(publicKeyPem);
-  const encrypted = publicKey.encrypt(data, 'RSA-OAEP', {
-    md: forge.md.sha256.create(),
-    mgf1: {
-      md: forge.md.sha1.create()
-    }
+  console.log('🔍 encryptWithPublicKey called with:', {
+    dataType: typeof data,
+    dataLength: data?.length,
+    dataPreview: data?.substring?.(0, 50) + '...',
+    publicKeyLength: publicKeyPem?.length,
+    publicKeyPreview: publicKeyPem?.substring?.(0, 50) + '...'
   });
-  return forge.util.encode64(encrypted);
+  
+  if (!data) {
+    throw new Error('Data to encrypt is undefined or null');
+  }
+  
+  if (!publicKeyPem) {
+    throw new Error('Public key PEM is undefined or null');
+  }
+  
+  try {
+    const publicKey = forge.pki.publicKeyFromPem(publicKeyPem);
+    console.log('✅ Successfully parsed public key from PEM');
+    
+    const encrypted = publicKey.encrypt(data, 'RSA-OAEP', {
+      md: forge.md.sha256.create(),
+      mgf1: {
+        md: forge.md.sha1.create()
+      }
+    });
+    
+    console.log('✅ Successfully encrypted data');
+    return forge.util.encode64(encrypted);
+  } catch (error) {
+    console.error('❌ Encryption failed:', error);
+    throw error;
+  }
 };
 
 /**
