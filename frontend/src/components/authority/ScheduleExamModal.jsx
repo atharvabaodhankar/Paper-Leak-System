@@ -16,11 +16,19 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
       if (!contract) return;
       try {
         const [addresses, names] = await contract.getAllCenters();
+        console.log('🔍 Fetched centers:', { addresses, names });
+        
         const centerList = addresses.map((addr, idx) => ({
           address: addr,
           name: names[idx]
         }));
+        
+        console.log('🔍 Center list:', centerList);
         setCenters(centerList);
+        
+        if (centerList.length === 0) {
+          console.log('⚠️ No exam centers registered yet');
+        }
       } catch (error) {
         console.error('Error fetching centers:', error);
       }
@@ -210,21 +218,60 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
       const encryptedKeys = [];
 
       for (const center of validCenters) {
+        console.log(`🔍 Processing center: ${center.centerAddress}`);
+        
         const centerPubKeyBytes = await contract.getCenterPublicKey(center.centerAddress);
         
-        if (!centerPubKeyBytes || centerPubKeyBytes === '0x' || centerPubKeyBytes.length === 0) {
-          alert(`Center ${center.centerAddress} has not registered a public key yet.`);
+        console.log('🔍 Center public key details:', {
+          centerAddress: center.centerAddress,
+          pubKeyBytes: centerPubKeyBytes,
+          pubKeyLength: centerPubKeyBytes?.length,
+          pubKeyType: typeof centerPubKeyBytes
+        });
+        
+        if (!centerPubKeyBytes || centerPubKeyBytes === '0x' || centerPubKeyBytes.length <= 2) {
+          alert(`Center ${center.centerAddress} has not registered a public key yet. Please ask them to register first.`);
           setLoading(false);
           return;
         }
         
-        const centerPubKeyPem = ethers.utils.toUtf8String(centerPubKeyBytes);
+        let centerPubKeyPem;
+        try {
+          // Try to convert bytes to PEM format
+          const keyBytes = ethers.utils.arrayify(centerPubKeyBytes);
+          centerPubKeyPem = new TextDecoder().decode(keyBytes);
+          
+          console.log('🔍 Converted center public key:', {
+            pemLength: centerPubKeyPem.length,
+            pemPreview: centerPubKeyPem.substring(0, 50) + '...'
+          });
+          
+          // Validate PEM format
+          if (!centerPubKeyPem.includes('BEGIN PUBLIC KEY')) {
+            throw new Error('Invalid PEM format');
+          }
+          
+        } catch (error) {
+          console.error('Error converting center public key:', error);
+          alert(`Center ${center.centerAddress} has an invalid public key format. Please ask them to re-register.`);
+          setLoading(false);
+          return;
+        }
         
-        const reEncryptedKey = encryptWithPublicKey(masterAESKey, centerPubKeyPem);
-        
-        centerAddresses.push(center.centerAddress);
-        classrooms.push(center.classroom);
-        encryptedKeys.push(ethers.utils.toUtf8Bytes(reEncryptedKey));
+        try {
+          const reEncryptedKey = encryptWithPublicKey(masterAESKey, centerPubKeyPem);
+          
+          centerAddresses.push(center.centerAddress);
+          classrooms.push(center.classroom);
+          encryptedKeys.push(ethers.utils.toUtf8Bytes(reEncryptedKey));
+          
+          console.log(`✅ Successfully encrypted key for center: ${center.centerAddress}`);
+        } catch (encryptError) {
+          console.error('Error encrypting for center:', encryptError);
+          alert(`Failed to encrypt key for center ${center.centerAddress}. Error: ${encryptError.message}`);
+          setLoading(false);
+          return;
+        }
       }
 
       await onSchedule(paper.id, unlockTimestamp, centerAddresses, classrooms, encryptedKeys);
