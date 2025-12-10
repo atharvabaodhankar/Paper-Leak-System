@@ -165,7 +165,7 @@ export const decryptWithPrivateKey = (encryptedDataBase64, privateKeyPem) => {
  * @returns {Promise<Object>} { publicKey, privateKey } in PEM format
  */
 export const generateDeterministicKeyPair = async (signature) => {
-  // Use the signature as a seed for deterministic key generation
+  // Create a deterministic seed from the signature
   const encoder = new TextEncoder();
   const data = encoder.encode(signature);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
@@ -174,26 +174,87 @@ export const generateDeterministicKeyPair = async (signature) => {
   // Convert hash to hex seed
   const seed = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
   
-  // Create a seeded PRNG
-  const prng = forge.random.createInstance();
-  
-  // Seed the PRNG with our deterministic seed
-  // We need to convert the hex seed to bytes
-  const seedBytes = forge.util.hexToBytes(seed);
-  prng.seedFileSync = () => seedBytes;
-  
-  // Generate keypair synchronously (no workers) for determinism
-  const keypair = forge.pki.rsa.generateKeyPair({ 
-    bits: 2048, 
-    workers: 0, // Disable workers to avoid errors
-    prng: prng,
-    algorithm: 'PRIMEINC' // Use deterministic algorithm
+  console.log('🔍 Deterministic key generation debug:', {
+    signature: signature.substring(0, 20) + '...',
+    signatureLength: signature.length,
+    seed: seed.substring(0, 20) + '...',
+    seedLength: seed.length
   });
   
-  return {
-    publicKey: forge.pki.publicKeyToPem(keypair.publicKey),
-    privateKey: forge.pki.privateKeyToPem(keypair.privateKey)
-  };
+  // Instead of trying to make RSA generation deterministic (which is very hard),
+  // let's use a different approach: generate a deterministic private key directly
+  // from the seed using mathematical operations
+  
+  // Create a deterministic big integer from the seed for the private key
+  const seedBigInt = BigInt('0x' + seed);
+  
+  // Use a fixed approach: generate keys using a deterministic method
+  // We'll create the private key components deterministically
+  
+  // For RSA, we need p, q (primes), n = p*q, e (public exponent), d (private exponent)
+  // Let's use a simpler approach: derive a consistent private key from the seed
+  
+  try {
+    // Method: Use the seed to create a deterministic entropy source
+    // and generate the same key every time
+    
+    // Create multiple hash rounds to get enough entropy
+    let currentHash = seed;
+    const entropy = [];
+    
+    for (let i = 0; i < 32; i++) { // Generate 32 rounds of entropy
+      const roundData = encoder.encode(currentHash + i.toString());
+      const roundHash = await crypto.subtle.digest('SHA-256', roundData);
+      const roundArray = Array.from(new Uint8Array(roundHash));
+      entropy.push(...roundArray);
+      currentHash = roundArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+    
+    // Convert entropy to a deterministic byte string for forge
+    const entropyString = entropy.map(b => String.fromCharCode(b % 256)).join('');
+    
+    // Create a truly deterministic PRNG that will always produce the same sequence
+    let entropyIndex = 0;
+    const trulyDeterministicPRNG = {
+      getBytesSync: function(count) {
+        const bytes = [];
+        for (let i = 0; i < count; i++) {
+          // Use entropy in a repeating, deterministic pattern
+          const byte = entropy[entropyIndex % entropy.length];
+          bytes.push(String.fromCharCode(byte));
+          entropyIndex++;
+        }
+        return bytes.join('');
+      }
+    };
+    
+    // Generate keypair with our truly deterministic PRNG
+    const keypair = forge.pki.rsa.generateKeyPair({ 
+      bits: 2048, 
+      workers: 0, // Disable workers for consistency
+      prng: trulyDeterministicPRNG,
+      algorithm: 'PRIMEINC' // Use incremental prime search for more determinism
+    });
+    
+    const publicKeyPem = forge.pki.publicKeyToPem(keypair.publicKey);
+    const privateKeyPem = forge.pki.privateKeyToPem(keypair.privateKey);
+    
+    console.log('🔑 Generated deterministic keys:', {
+      publicKeyLength: publicKeyPem.length,
+      privateKeyLength: privateKeyPem.length,
+      publicKeyPreview: publicKeyPem.substring(0, 100) + '...',
+      entropyLength: entropy.length,
+      signature: signature.substring(0, 20) + '...'
+    });
+    
+    return {
+      publicKey: publicKeyPem,
+      privateKey: privateKeyPem
+    };
+  } catch (error) {
+    console.error('Deterministic key generation failed:', error);
+    throw new Error(`Key generation failed: ${error.message}`);
+  }
 };
 
 /**
