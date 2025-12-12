@@ -1,17 +1,19 @@
 {
   "network": "sepolia",
   "contractName": "ExamRegistry",
-  "contractAddress": "0x861Dd603C4202dA59856F1eeE7c3BCa41d9eD727",
-  "etherscanUrl": "https://sepolia.etherscan.io/address/0x861Dd603C4202dA59856F1eeE7c3BCa41d9eD727#code",
-  "deploymentDate": "2025-12-18",
+  "contractAddress": "0x550447A2a9226dfd8DB2c3f8c36CaBD56cA1CE99",
+  "etherscanUrl": "https://sepolia.etherscan.io/address/0x550447A2a9226dfd8DB2c3f8c36CaBD56cA1CE99",
+  "deploymentDate": "2025-01-26",
   "compiler": "0.8.20",
-  "verified": true,
-  "deployer": "0x...", 
+  "verified": false,
+  "deployer": "0x93111875c8A3E1243d3144701a8a576020e91904", 
+  "version": "2.0.0-time-locked",
   "features": [
-    "Paper upload with IPFS storage",
-    "Time-locked exam scheduling", 
-    "Exam center public key registration",
-    "Secure paper unlocking mechanism",
-    "Event logging for transparency"
+    "Time-locked encryption system",
+    "Authority cannot decrypt papers",
+    "Simplified key management",
+    "Multiple authorities support",
+    "Automatic time unlocking",
+    "Secure paper scheduling"
   ]
 }

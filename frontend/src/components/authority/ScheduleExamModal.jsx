@@ -1,7 +1,5 @@
 import { useState, useEffect } from 'react';
 import { useWeb3 } from '../../context/Web3Context';
-import { decryptWithPrivateKey, encryptWithPublicKey, generateDeterministicKeyPair } from '../../utils/crypto';
-import { ethers } from 'ethers';
 
 const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
   const { contract, account } = useWeb3();
@@ -82,225 +80,19 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
         return;
       }
 
-      // Regenerate Authority's private key from MetaMask signature
-      let authorityPrivKey;
-      let masterAESKey; // Declare at function scope so it's accessible later
-      
-      try {
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const signer = provider.getSigner();
-        const message = `Generate ChainSeal encryption keys for Authority\nAccount: ${account}`;
-        const signature = await signer.signMessage(message);
-        
-        // Generate deterministic keys from signature
-        const keys = await generateDeterministicKeyPair(signature);
-        authorityPrivKey = keys.privateKey;
-        
-        console.log('🔍 Key generation details:', {
-          account,
-          signatureLength: signature.length,
-          privateKeyLength: authorityPrivKey.length,
-          publicKeyLength: keys.publicKey.length
-        });
-        
-        // Get the Authority's public key from blockchain to verify
-        const blockchainPubKey = await contract.authorityPublicKey();
-        const blockchainPubKeyPem = ethers.utils.toUtf8String(blockchainPubKey);
-        
-        console.log('🔍 Key comparison:', {
-          generatedPublicKey: keys.publicKey.substring(0, 100) + '...',
-          blockchainPublicKey: blockchainPubKeyPem.substring(0, 100) + '...',
-          keysMatch: keys.publicKey === blockchainPubKeyPem
-        });
-        
-        if (keys.publicKey !== blockchainPubKeyPem) {
-          throw new Error('Key mismatch: You are not the same Authority who registered the public key. Please use the MetaMask account that originally registered as Authority.');
-        }
-        
-        // Try to decrypt the master AES key
-        // The encrypted key was stored as UTF-8 bytes of base64 string, so we need to convert it back properly
-        const encryptedKeyBytes = ethers.utils.arrayify(paper.authorityEncryptedKey);
-        const encryptedMasterKeyBase64 = new TextDecoder().decode(encryptedKeyBytes);
-        
-        console.log('🔍 Attempting to decrypt master key:', {
-          encryptedKeyLength: encryptedMasterKeyBase64.length,
-          privateKeyLength: authorityPrivKey.length,
-          encryptedKeyPreview: encryptedMasterKeyBase64.substring(0, 50) + '...',
-          rawBytesLength: encryptedKeyBytes.length,
-          rawBytesPreview: Array.from(encryptedKeyBytes.slice(0, 20)).map(b => b.toString(16).padStart(2, '0')).join(' ')
-        });
-        
-        // Try multiple decryption approaches
-        let decryptionMethod = '';
-        
-        try {
-          // Method 1: Direct decryption with converted base64
-          masterAESKey = decryptWithPrivateKey(encryptedMasterKeyBase64, authorityPrivKey);
-          decryptionMethod = 'Method 1: TextDecoder conversion';
-        } catch (error1) {
-          console.log('🔍 Method 1 failed, trying Method 2...');
-          
-          try {
-            // Method 2: Try with ethers.utils.toUtf8String (original approach)
-            const encryptedKeyUtf8 = ethers.utils.toUtf8String(paper.authorityEncryptedKey);
-            masterAESKey = decryptWithPrivateKey(encryptedKeyUtf8, authorityPrivKey);
-            decryptionMethod = 'Method 2: ethers.utils.toUtf8String';
-          } catch (error2) {
-            console.log('🔍 Method 2 failed, trying Method 3...');
-            
-            try {
-              // Method 3: Try treating as raw binary data
-              const binaryString = String.fromCharCode(...encryptedKeyBytes);
-              const base64Data = btoa(binaryString);
-              masterAESKey = decryptWithPrivateKey(base64Data, authorityPrivKey);
-              decryptionMethod = 'Method 3: Binary to base64';
-            } catch (error3) {
-              console.error('All decryption methods failed:', { error1: error1.message, error2: error2.message, error3: error3.message });
-              throw new Error(`All decryption methods failed. This paper might have been encrypted with a different key or format. Please ask the teacher to re-upload this paper after ensuring Authority is properly registered.`);
-            }
-          }
-        }
-        
-        console.log(`✅ Successfully decrypted master AES key using: ${decryptionMethod}`);
-        console.log('🔍 Decrypted AES key details:', {
-          masterAESKeyType: typeof masterAESKey,
-          masterAESKeyLength: masterAESKey?.length,
-          masterAESKeyPreview: masterAESKey?.substring?.(0, 20) + '...'
-        });
-        
-      } catch (error) {
-        console.error('Error regenerating encryption keys:', error);
-        
-        let errorMessage = `Failed to regenerate encryption keys: ${error.message}\n\n`;
-        
-        if (error.message.includes('Invalid RSAES-OAEP padding')) {
-          errorMessage += `🔍 RSA Padding Error Analysis:\n\n`;
-          errorMessage += `✅ Keys Match: Your account IS the registered Authority\n`;
-          errorMessage += `❌ Decryption Failed: The encrypted data format is incompatible\n\n`;
-          errorMessage += `This usually means:\n`;
-          errorMessage += `1. Paper was uploaded BEFORE Authority registration\n`;
-          errorMessage += `2. Paper was uploaded with an older version of the system\n`;
-          errorMessage += `3. There's a data format mismatch\n\n`;
-          errorMessage += `🔧 SOLUTION: Ask the teacher to RE-UPLOAD this paper.\n`;
-          errorMessage += `New uploads will use the correct encryption format.`;
-        } else if (error.message.includes('Key mismatch')) {
-          errorMessage += `Please switch to the MetaMask account that originally registered as Authority.`;
-        } else if (error.message.includes('All decryption methods failed')) {
-          errorMessage += `🔧 SOLUTION: This paper needs to be re-uploaded by the teacher.\n`;
-          errorMessage += `The current encryption format is incompatible with your Authority keys.`;
-        } else {
-          errorMessage += `Other possible causes:\n`;
-          errorMessage += `1. Authority hasn't registered yet\n`;
-          errorMessage += `2. Network or blockchain connection issues\n`;
-          errorMessage += `3. Temporary MetaMask connectivity problems`;
-        }
-        
-        alert(errorMessage);
-        setLoading(false);
-        return;
-      }
-
-      // Validate that masterAESKey was successfully decrypted
-      if (!masterAESKey) {
-        console.error('❌ Master AES key is undefined after decryption attempt');
-        alert('Failed to decrypt the master AES key. Please try again or contact support.');
-        setLoading(false);
-        return;
-      }
-
-      console.log('✅ Master AES key validation passed:', {
-        masterAESKeyType: typeof masterAESKey,
-        masterAESKeyLength: masterAESKey?.length,
-        masterAESKeyPreview: masterAESKey?.substring?.(0, 20) + '...'
-      });
-
-      // Check if paper has authorityEncryptedKey
-      console.log('🔍 DEBUG: Paper data:', {
+      console.log('🔍 Scheduling exam with time-locked system:', {
         paperId: paper.id,
-        examName: paper.examName,
-        authorityEncryptedKey: paper.authorityEncryptedKey,
-        keyType: typeof paper.authorityEncryptedKey,
-        keyLength: paper.authorityEncryptedKey?.length,
-        isHex: paper.authorityEncryptedKey?.startsWith?.('0x'),
-        keyPreview: paper.authorityEncryptedKey?.substring?.(0, 100) + '...'
+        unlockTimestamp,
+        unlockTime: new Date(unlockTimestamp * 1000).toLocaleString(),
+        centers: validCenters.map(c => c.centerAddress),
+        classrooms: validCenters.map(c => c.classroom)
       });
-      
-      if (!paper.authorityEncryptedKey || paper.authorityEncryptedKey === '0x' || paper.authorityEncryptedKey.length <= 2) {
-        alert('This paper does not have an encrypted key for the Authority. The paper may have been uploaded before Authority registration. Please re-upload the paper.');
-        setLoading(false);
-        return;
-      }
 
-      // Re-encrypt for each selected center
-      const centerAddresses = [];
-      const classrooms = [];
-      const encryptedKeys = [];
+      // In the new system, Authority just schedules - no key decryption/re-encryption needed!
+      const centerAddresses = validCenters.map(c => c.centerAddress);
+      const classrooms = validCenters.map(c => c.classroom);
 
-      for (const center of validCenters) {
-        console.log(`🔍 Processing center: ${center.centerAddress}`);
-        
-        const centerPubKeyBytes = await contract.getCenterPublicKey(center.centerAddress);
-        
-        console.log('🔍 Center public key details:', {
-          centerAddress: center.centerAddress,
-          pubKeyBytes: centerPubKeyBytes,
-          pubKeyLength: centerPubKeyBytes?.length,
-          pubKeyType: typeof centerPubKeyBytes
-        });
-        
-        if (!centerPubKeyBytes || centerPubKeyBytes === '0x' || centerPubKeyBytes.length <= 2) {
-          alert(`Center ${center.centerAddress} has not registered a public key yet. Please ask them to register first.`);
-          setLoading(false);
-          return;
-        }
-        
-        let centerPubKeyPem;
-        try {
-          // Try to convert bytes to PEM format
-          const keyBytes = ethers.utils.arrayify(centerPubKeyBytes);
-          centerPubKeyPem = new TextDecoder().decode(keyBytes);
-          
-          console.log('🔍 Converted center public key:', {
-            pemLength: centerPubKeyPem.length,
-            pemPreview: centerPubKeyPem.substring(0, 50) + '...'
-          });
-          
-          // Validate PEM format
-          if (!centerPubKeyPem.includes('BEGIN PUBLIC KEY')) {
-            throw new Error('Invalid PEM format');
-          }
-          
-        } catch (error) {
-          console.error('Error converting center public key:', error);
-          alert(`Center ${center.centerAddress} has an invalid public key format. Please ask them to re-register.`);
-          setLoading(false);
-          return;
-        }
-        
-        try {
-          console.log('🔍 About to encrypt AES key for center:', {
-            centerAddress: center.centerAddress,
-            masterAESKeyType: typeof masterAESKey,
-            masterAESKeyLength: masterAESKey?.length,
-            masterAESKeyPreview: masterAESKey?.substring?.(0, 20) + '...'
-          });
-          
-          const reEncryptedKey = encryptWithPublicKey(masterAESKey, centerPubKeyPem);
-          
-          centerAddresses.push(center.centerAddress);
-          classrooms.push(center.classroom);
-          encryptedKeys.push(ethers.utils.toUtf8Bytes(reEncryptedKey));
-          
-          console.log(`✅ Successfully encrypted key for center: ${center.centerAddress}`);
-        } catch (encryptError) {
-          console.error('Error encrypting for center:', encryptError);
-          alert(`Failed to encrypt key for center ${center.centerAddress}. Error: ${encryptError.message}`);
-          setLoading(false);
-          return;
-        }
-      }
-
-      await onSchedule(paper.id, unlockTimestamp, centerAddresses, classrooms, encryptedKeys);
+      await onSchedule(paper.id, unlockTimestamp, centerAddresses, classrooms);
     } catch (error) {
       console.error('Scheduling error:', error);
       alert(`Error: ${error.message}`);
@@ -312,10 +104,20 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm overflow-y-auto">
       <div className="glass-card w-full max-w-2xl p-8 my-8 animate-in fade-in zoom-in duration-300">
-        <h3 className="text-2xl font-bold mb-2">Schedule Exam (Multi-Center)</h3>
-        <p className="text-[hsl(var(--color-text-secondary))] mb-6 text-sm">
+        <h3 className="text-2xl font-bold mb-2">Schedule Exam (Time-Locked System)</h3>
+        <p className="text-[hsl(var(--color-text-secondary))] mb-2 text-sm">
           Assign: <span className="text-[hsl(var(--color-primary))] font-semibold">{paper.examName} ({paper.subject})</span>
         </p>
+        <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-3 mb-6 text-sm">
+          <div className="flex items-center gap-2 text-green-400 font-semibold mb-1">
+            🔒 Secure Time-Locked System
+          </div>
+          <ul className="text-green-300 text-xs space-y-1">
+            <li>• Authority cannot decrypt papers (zero-trust architecture)</li>
+            <li>• Papers unlock automatically at scheduled time</li>
+            <li>• No key management or re-encryption needed</li>
+          </ul>
+        </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
           {/* Date and Time */}
@@ -411,7 +213,7 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
               className="btn-primary flex-1"
               disabled={loading}
             >
-              {loading ? 'Processing...' : 'Confirm Schedule'}
+              {loading ? 'Scheduling...' : '🔒 Schedule with Time-Lock'}
             </button>
           </div>
         </form>

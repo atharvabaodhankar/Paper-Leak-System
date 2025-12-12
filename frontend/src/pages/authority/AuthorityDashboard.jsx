@@ -1,8 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useWeb3 } from '../../context/Web3Context';
 import ScheduleExamModal from '../../components/authority/ScheduleExamModal';
-import { generateDeterministicKeyPair } from '../../utils/crypto';
-import { ethers } from 'ethers';
 
 const AuthorityDashboard = () => {
   const { contract, account } = useWeb3();
@@ -10,7 +8,7 @@ const AuthorityDashboard = () => {
   const [loading, setLoading] = useState(false);
   const [selectedPaper, setSelectedPaper] = useState(null);
   const [txStatus, setTxStatus] = useState('');
-  const [keyStatus, setKeyStatus] = useState('Checking authority keys...');
+  const [authorityStatus, setAuthorityStatus] = useState('Checking authority status...');
   const [isRegistered, setIsRegistered] = useState(false);
   const [checkingRegistration, setCheckingRegistration] = useState(true);
 
@@ -31,7 +29,8 @@ const AuthorityDashboard = () => {
           isUnlocked: paper.isUnlocked,
           unlockTimestamp: paper.unlockTimestamp,
           uploadTimestamp: paper.uploadTimestamp,
-          authorityEncryptedKey: paper.authorityEncryptedKey,
+          timeLockedKey: paper.timeLockedKey,
+          keyDerivationSalt: paper.keyDerivationSalt,
           ipfsCIDs: paper.ipfsCIDs
         });
       }
@@ -47,89 +46,67 @@ const AuthorityDashboard = () => {
     if (!contract || !account) return;
     
     try {
-      setKeyStatus('🔄 Registering as Authority...');
+      setAuthorityStatus('🔄 Registering as Authority...');
       setCheckingRegistration(true);
       
-      // Generate deterministic keys from MetaMask signature
-      const provider = new ethers.providers.Web3Provider(window.ethereum);
-      const signer = provider.getSigner();
-      const message = `Generate ChainSeal encryption keys for Authority\nAccount: ${account}`;
-      const signature = await signer.signMessage(message);
-      const keys = await generateDeterministicKeyPair(signature);
-      
-      // Register authority public key on blockchain
-      const tx = await contract.registerAuthority(ethers.utils.toUtf8Bytes(keys.publicKey));
-      setKeyStatus('⏳ Waiting for blockchain confirmation...');
+      // Register authority (no public key needed in new system)
+      const tx = await contract.registerAuthority('Exam Authority');
+      setAuthorityStatus('⏳ Waiting for blockchain confirmation...');
       await tx.wait();
       
       // Update status
-      setKeyStatus(`✅ Successfully registered as Authority (${account.slice(0, 6)}...${account.slice(-4)})`);
+      setAuthorityStatus(`✅ Successfully registered as Authority (${account.slice(0, 6)}...${account.slice(-4)})`);
       setIsRegistered(true);
       
-      // Refresh papers since teachers can now upload
+      // Refresh papers
       fetchAllPapers();
       
     } catch (error) {
       console.error('Registration failed:', error);
-      setKeyStatus(`❌ Registration failed: ${error.message}`);
+      setAuthorityStatus(`❌ Registration failed: ${error.message}`);
     } finally {
       setCheckingRegistration(false);
     }
   };
 
   useEffect(() => {
-    const checkAndGenerateKeys = async () => {
+    const checkAuthorityStatus = async () => {
       if (!account || !contract) return;
 
       try {
         setCheckingRegistration(true);
         
-        // Check if Authority is registered
-        const authorityPubKeyBytes = await contract.authorityPublicKey();
+        // Check if current account is registered as authority
+        const authorityInfo = await contract.authorities(account);
         
-        if (!authorityPubKeyBytes || authorityPubKeyBytes === '0x') {
-          setKeyStatus('❌ No Authority registered yet. Click "Register as Authority" to set up your keys.');
+        if (!authorityInfo.isRegistered) {
+          setAuthorityStatus('❌ Not registered as Authority. Click "Register as Authority" to get started.');
           setIsRegistered(false);
-          setCheckingRegistration(false);
-          return;
-        }
-
-        // Generate keys from current account to check if it matches
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const signer = provider.getSigner();
-        const message = `Generate ChainSeal encryption keys for Authority\nAccount: ${account}`;
-        const signature = await signer.signMessage(message);
-        const keys = await generateDeterministicKeyPair(signature);
-        
-        // Compare with registered public key
-        const registeredPubKey = ethers.utils.toUtf8String(authorityPubKeyBytes);
-        const isCurrentAccountAuthority = keys.publicKey === registeredPubKey;
-        
-        if (isCurrentAccountAuthority) {
-          setKeyStatus(`✅ You are the registered Authority (${account.slice(0, 6)}...${account.slice(-4)})`);
-          setIsRegistered(true);
+        } else if (!authorityInfo.isActive) {
+          setAuthorityStatus('⚠️ Authority account is inactive. Contact administrator.');
+          setIsRegistered(false);
         } else {
-          setKeyStatus(`⚠️ You are NOT the registered Authority. Switch to the correct MetaMask account to schedule exams.`);
-          setIsRegistered(false);
+          setAuthorityStatus(`✅ You are a registered Authority (${account.slice(0, 6)}...${account.slice(-4)})`);
+          setIsRegistered(true);
         }
         
       } catch (error) {
         console.error('Error checking authority status:', error);
-        setKeyStatus(`❌ Error checking authority status: ${error.message}`);
+        setAuthorityStatus(`❌ Error checking authority status: ${error.message}`);
         setIsRegistered(false);
       } finally {
         setCheckingRegistration(false);
       }
     };
 
-    checkAndGenerateKeys();
+    checkAuthorityStatus();
     fetchAllPapers();
   }, [contract, account]);
 
-  const handleSchedule = async (paperId, unlockTimestamp, centers, classrooms, encryptedKeys) => {
+  const handleSchedule = async (paperId, unlockTimestamp, centers, classrooms) => {
     try {
       setTxStatus('Initiating transaction...');
-      const tx = await contract.scheduleExam(paperId, unlockTimestamp, centers, classrooms, encryptedKeys);
+      const tx = await contract.scheduleExam(paperId, unlockTimestamp, centers, classrooms);
       
       setTxStatus('Waiting for blockchain confirmation...');
       await tx.wait();
@@ -165,7 +142,7 @@ const AuthorityDashboard = () => {
             <div>
               <h3 className="font-semibold text-sm">Authority Status</h3>
               <p className="text-xs text-[hsl(var(--color-text-secondary))]">
-                {keyStatus}
+                {authorityStatus}
               </p>
             </div>
           </div>
@@ -191,10 +168,10 @@ const AuthorityDashboard = () => {
       <div className="flex justify-between items-center">
         <div>
           <h2 className="text-2xl font-bold">Exam Authority Dashboard</h2>
-          <p className="text-[hsl(var(--color-text-secondary))]">Review uploaded papers and allocate exam schedules</p>
+          <p className="text-[hsl(var(--color-text-secondary))]">Schedule uploaded papers for exam centers (Authority cannot decrypt papers)</p>
         </div>
         <div className="flex items-center gap-4">
-          <span className="text-xs text-[hsl(var(--color-text-muted))] uppercase font-bold">Admin View</span>
+          <span className="text-xs text-[hsl(var(--color-text-muted))] uppercase font-bold">Time-Locked System</span>
           <button onClick={fetchAllPapers} disabled={loading} className="btn-outline py-2 px-4 text-xs">
             {loading ? 'Refreshing...' : 'Refresh Data'}
           </button>
@@ -237,6 +214,7 @@ const AuthorityDashboard = () => {
                   <td className="px-6 py-4">
                     <div className="font-semibold">{paper.examName}</div>
                     <div className="text-xs text-[hsl(var(--color-text-muted))]">{paper.subject}</div>
+                    <div className="text-xs text-[hsl(var(--color-text-muted))] font-mono">🔒 Time-Locked</div>
                   </td>
                   <td className="px-6 py-4">
                     <div className="text-xs font-mono bg-black/20 p-1.5 rounded inline-block">
@@ -247,8 +225,7 @@ const AuthorityDashboard = () => {
                     {getStatusBadge(paper)}
                     {paper.isScheduled && (
                       <div className="text-[10px] mt-1 text-[hsl(var(--color-text-muted))]">
-                        Time: {new Date(paper.unlockTimestamp.toNumber() * 1000).toLocaleString()} <br/>
-                        Room: {paper.roomNumber}
+                        Unlock: {new Date(paper.unlockTimestamp.toNumber() * 1000).toLocaleString()}
                       </div>
                     )}
                   </td>
@@ -262,12 +239,12 @@ const AuthorityDashboard = () => {
                             ? 'btn-primary' 
                             : 'bg-gray-500/20 text-gray-500 cursor-not-allowed'
                         }`}
-                        title={!isRegistered ? 'You must be the registered Authority to schedule papers' : ''}
+                        title={!isRegistered ? 'You must be a registered Authority to schedule papers' : ''}
                       >
                         {checkingRegistration ? 'Checking...' : 'Schedule'}
                       </button>
                     ) : (
-                      <span className="text-[10px] text-success font-bold uppercase">Locked 🛡️</span>
+                      <span className="text-[10px] text-success font-bold uppercase">Scheduled 🛡️</span>
                     )}
                   </td>
                 </tr>
