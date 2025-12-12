@@ -181,13 +181,6 @@ export const generateDeterministicKeyPair = async (signature) => {
     seedLength: seed.length
   });
   
-  // Instead of trying to make RSA generation deterministic (which is very hard),
-  // let's use a different approach: generate a deterministic private key directly
-  // from the seed using mathematical operations
-  
-  // Create a deterministic big integer from the seed for the private key
-  const seedBigInt = BigInt('0x' + seed);
-  
   // Use a fixed approach: generate keys using a deterministic method
   // We'll create the private key components deterministically
   
@@ -211,8 +204,6 @@ export const generateDeterministicKeyPair = async (signature) => {
     }
     
     // Convert entropy to a deterministic byte string for forge
-    const entropyString = entropy.map(b => String.fromCharCode(b % 256)).join('');
-    
     // Create a truly deterministic PRNG that will always produce the same sequence
     let entropyIndex = 0;
     const trulyDeterministicPRNG = {
@@ -279,7 +270,7 @@ export const generateTimeLockedKey = async (unlockTimestamp, salt) => {
   const timeKeyHex = timeSeed.substring(0, 64);
   const timeKeyBytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
-    timeKeyBytes[i] = parseInt(timeKeyHex.substr(i * 2, 2), 16);
+    timeKeyBytes[i] = parseInt(timeKeyHex.substring(i * 2, i * 2 + 2), 16);
   }
   const timeKey = arrayToBase64(timeKeyBytes);
   
@@ -331,7 +322,7 @@ export const decryptTimeLockedKey = async (timeLockedKeyJson, unlockTimestamp, s
   const timeKeyHex = timeSeed.substring(0, 64);
   const timeKeyBytes = new Uint8Array(32);
   for (let i = 0; i < 32; i++) {
-    timeKeyBytes[i] = parseInt(timeKeyHex.substr(i * 2, 2), 16);
+    timeKeyBytes[i] = parseInt(timeKeyHex.substring(i * 2, i * 2 + 2), 16);
   }
   const timeKey = arrayToBase64(timeKeyBytes);
   

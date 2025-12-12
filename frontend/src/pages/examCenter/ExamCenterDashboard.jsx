@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useWeb3 } from '../../context/Web3Context';
 import { reassemblePDF } from '../../utils/pdf/reassembler';
-import { generateDeterministicKeyPair } from '../../utils/crypto';
 import { ethers } from 'ethers';
 
 const ExamCenterDashboard = () => {
@@ -39,9 +38,9 @@ const ExamCenterDashboard = () => {
     return `${seconds}s remaining`;
   };
 
-  // Auto-generate keys and register center on mount/account change
+  // Auto-check center registration on mount/account change
   useEffect(() => {
-    const checkAndGenerateKeys = async () => {
+    const checkRegistration = async () => {
       if (!account || !contract) return;
 
       try {
@@ -51,133 +50,19 @@ const ExamCenterDashboard = () => {
         console.log('🔍 Center registration check:', {
           account,
           isRegistered: centerInfo.isRegistered,
-          centerName: centerInfo.name,
-          hasPublicKey: centerInfo.publicKey && centerInfo.publicKey !== '0x'
+          centerName: centerInfo.name
         });
         
         if (!centerInfo.isRegistered) {
-          setKeyStatus('Initializing secure environment...');
-          
-          // Check if we already have keys in localStorage first
-          const existingPrivKey = localStorage.getItem(`chainseal_priv_${account}`);
-          const existingPubKey = localStorage.getItem(`chainseal_pub_${account}`);
-          
-          if (existingPrivKey && existingPubKey) {
-            console.log('🔑 Using existing keys from localStorage for unregistered center');
-            setKeyStatus('');
-            setShowNamePrompt(true);
-            return;
-          }
-          
-          // Only generate new keys if we don't have them
-          const provider = new ethers.providers.Web3Provider(window.ethereum);
-          const signer = provider.getSigner();
-          const message = `Generate ChainSeal encryption keys for Exam Center\nAccount: ${account}`;
-          const signature = await signer.signMessage(message);
-          
-          const keys = await generateDeterministicKeyPair(signature);
-          
-          // Store keys in localStorage for later use
-          localStorage.setItem(`chainseal_pub_${account}`, keys.publicKey);
-          localStorage.setItem(`chainseal_priv_${account}`, keys.privateKey);
-          
-          console.log('🔑 Generated and stored encryption keys for exam center:', {
-            account,
-            publicKeyLength: keys.publicKey.length,
-            privateKeyLength: keys.privateKey.length,
-            publicKeyPreview: keys.publicKey.substring(0, 100) + '...'
-          });
-          
-          setKeyStatus('');
           setShowNamePrompt(true);
-        } else {
-          // Center is registered, check if we have keys in localStorage
-          const existingPrivKey = localStorage.getItem(`chainseal_priv_${account}`);
-          const existingPubKey = localStorage.getItem(`chainseal_pub_${account}`);
-          
-          if (!existingPrivKey || !existingPubKey) {
-            setKeyStatus('Regenerating security keys...');
-            
-            // Clear any existing keys first
-            localStorage.removeItem(`chainseal_pub_${account}`);
-            localStorage.removeItem(`chainseal_priv_${account}`);
-            
-            // Only request signature once for key regeneration
-            const provider = new ethers.providers.Web3Provider(window.ethereum);
-            const signer = provider.getSigner();
-            const message = `Generate ChainSeal encryption keys for Exam Center\nAccount: ${account}`;
-            const signature = await signer.signMessage(message);
-            
-            const keys = await generateDeterministicKeyPair(signature);
-            
-            // Store keys in localStorage
-            localStorage.setItem(`chainseal_pub_${account}`, keys.publicKey);
-            localStorage.setItem(`chainseal_priv_${account}`, keys.privateKey);
-            
-            console.log('🔑 Regenerated and stored encryption keys for registered center:', {
-              account,
-              publicKeyLength: keys.publicKey.length,
-              privateKeyLength: keys.privateKey.length,
-              publicKeyPreview: keys.publicKey.substring(0, 100) + '...'
-            });
-            
-            // Verify the keys match what's on blockchain (without requesting another signature)
-            try {
-              const blockchainPubKeyBytes = await contract.getCenterPublicKey(account);
-              const blockchainPubKeyPem = new TextDecoder().decode(ethers.utils.arrayify(blockchainPubKeyBytes));
-              
-              console.log('🔍 Key verification after regeneration:', {
-                blockchainPublicKey: blockchainPubKeyPem.substring(0, 100) + '...',
-                regeneratedPublicKey: keys.publicKey.substring(0, 100) + '...',
-                keysMatch: blockchainPubKeyPem === keys.publicKey,
-                blockchainKeyLength: blockchainPubKeyPem.length,
-                regeneratedKeyLength: keys.publicKey.length
-              });
-              
-              if (blockchainPubKeyPem !== keys.publicKey) {
-                console.error('❌ Keys still do not match after regeneration');
-                console.log('🔧 Attempting to re-register center with correct keys...');
-                
-                // The center was registered with different keys, so we need to re-register
-                // with the keys that match our current MetaMask account
-                try {
-                  setKeyStatus('🔧 Re-registering center with correct keys...');
-                  
-                  // Re-register the center with the newly generated keys
-                  const tx = await contract.registerExamCenter('HBM101', ethers.utils.toUtf8Bytes(keys.publicKey));
-                  await tx.wait();
-                  
-                  console.log('✅ Successfully re-registered center with matching keys');
-                  setKeyStatus('✅ Center re-registered with correct keys');
-                  
-                  setTimeout(() => setKeyStatus(''), 3000);
-                } catch (reregisterError) {
-                  console.error('Failed to re-register center:', reregisterError);
-                  setKeyStatus('❌ Failed to re-register center. You may need to use the original MetaMask account.');
-                }
-              } else {
-                console.log('✅ Keys match! Deterministic generation is working correctly.');
-              }
-            } catch (keyCheckError) {
-              console.error('Error checking blockchain keys:', keyCheckError);
-            }
-          } else {
-            console.log('🔑 Using existing keys from localStorage:', {
-              account,
-              publicKeyLength: existingPubKey.length,
-              privateKeyLength: existingPrivKey.length
-            });
-          }
-          
-          setKeyStatus('');
         }
       } catch (error) {
         console.error("Error checking registration:", error);
-        setKeyStatus('Error initializing security. Please reload.');
+        setKeyStatus('Error checking registration. Please reload.');
       }
     };
 
-    checkAndGenerateKeys();
+    checkRegistration();
   }, [account, contract]);
 
   const handleRegisterCenter = async () => {
@@ -188,8 +73,10 @@ const ExamCenterDashboard = () => {
 
     try {
       setStatus('Registering center on blockchain...');
-      const pubKey = localStorage.getItem(`chainseal_pub_${account}`);
-      const tx = await contract.registerExamCenter(centerName, ethers.utils.toUtf8Bytes(pubKey));
+      // In the time-locked system, we don't need RSA keys for centers
+      // Just register with a placeholder public key
+      const placeholderKey = ethers.utils.toUtf8Bytes('time-locked-system');
+      const tx = await contract.registerExamCenter(centerName, placeholderKey);
       await tx.wait();
       setStatus('Center registered successfully!');
       setShowNamePrompt(false);
@@ -210,9 +97,9 @@ const ExamCenterDashboard = () => {
       for (let i = 1; i <= count.toNumber(); i++) {
         const paper = await contract.getPaper(i);
         
-        // Check if this center has access to this paper
-        const myKey = await contract.getMyPaperKey(i);
-        if (myKey && myKey.length > 0 && paper.isScheduled) {
+        // Check if this center is assigned to this paper using new method
+        const isAssigned = await contract.isAssignedToCenter(i, account);
+        if (isAssigned && paper.isScheduled) {
           const myClassroom = await contract.getMyClassroom(i);
           fetchedPapers.push({ 
             id: i, 
@@ -236,92 +123,27 @@ const ExamCenterDashboard = () => {
   }, [contract, showNamePrompt]);
 
   const handleDownload = async (paper) => {
-    const privKey = localStorage.getItem(`chainseal_priv_${account}`);
-    if (!privKey) {
-      setStatus('🔑 Security keys missing. Regenerating keys...');
-      
-      try {
-        // Try to regenerate keys
-        const provider = new ethers.providers.Web3Provider(window.ethereum);
-        const signer = provider.getSigner();
-        const message = `Generate ChainSeal encryption keys for Exam Center\nAccount: ${account}`;
-        const signature = await signer.signMessage(message);
-        
-        const keys = await generateDeterministicKeyPair(signature);
-        
-        // Store keys in localStorage
-        localStorage.setItem(`chainseal_pub_${account}`, keys.publicKey);
-        localStorage.setItem(`chainseal_priv_${account}`, keys.privateKey);
-        
-        console.log('🔑 Regenerated keys for download:', {
-          account,
-          publicKeyLength: keys.publicKey.length,
-          privateKeyLength: keys.privateKey.length
-        });
-        
-        // Use the newly generated private key
-        const newPrivKey = keys.privateKey;
-        return handleDownloadWithKey(paper, newPrivKey);
-        
-      } catch (error) {
-        console.error('Key regeneration failed:', error);
-        setStatus('❌ Failed to regenerate security keys. Please reload the page.');
-        return;
-      }
-    }
-
-    return handleDownloadWithKey(paper, privKey);
-  };
-
-  const handleDownloadWithKey = async (paper, privKey) => {
     try {
       setDownloadingId(paper.id);
-      setStatus('Fetching your encrypted key...');
+      setStatus('Fetching time-locked key...');
       
-      const encryptedKeyBytes = await contract.getMyPaperKey(paper.id);
-      const encryptedKeyBase64 = ethers.utils.toUtf8String(encryptedKeyBytes);
+      // Get the time-locked key and salt from the contract
+      const [timeLockedKeyBytes, salt] = await contract.getTimeLockedKey(paper.id);
+      const timeLockedKeyJson = ethers.utils.toUtf8String(timeLockedKeyBytes);
       
-      console.log('🔍 Download debug info:', {
+      console.log('🔍 Time-locked key download debug:', {
         paperId: paper.id,
         account,
-        encryptedKeyLength: encryptedKeyBase64.length,
-        encryptedKeyPreview: encryptedKeyBase64.substring(0, 50) + '...',
-        privateKeyLength: privKey.length,
-        privateKeyPreview: privKey.substring(0, 50) + '...'
+        timeLockedKeyLength: timeLockedKeyJson.length,
+        salt: salt.substring(0, 20) + '...',
+        unlockTimestamp: paper.unlockTimestamp.toNumber(),
+        currentTime: Math.floor(Date.now() / 1000)
       });
-      
-      // Check what public key is registered on blockchain for this center
-      const blockchainPubKeyBytes = await contract.getCenterPublicKey(account);
-      const blockchainPubKeyPem = new TextDecoder().decode(ethers.utils.arrayify(blockchainPubKeyBytes));
-      
-      // Get current public key from localStorage (don't regenerate)
-      const currentPubKey = localStorage.getItem(`chainseal_pub_${account}`);
-      
-      console.log('🔍 Key comparison for download:', {
-        blockchainPublicKey: blockchainPubKeyPem.substring(0, 100) + '...',
-        currentPublicKey: currentPubKey ? currentPubKey.substring(0, 100) + '...' : 'null',
-        keysMatch: blockchainPubKeyPem === currentPubKey,
-        blockchainKeyLength: blockchainPubKeyPem.length,
-        currentKeyLength: currentPubKey ? currentPubKey.length : 0
-      });
-      
-      if (!currentPubKey || blockchainPubKeyPem !== currentPubKey) {
-        setStatus('❌ Key mismatch detected! Click "🔑 Fix Keys" button to regenerate your encryption keys.');
-        console.error('❌ Key mismatch: The keys in localStorage do not match the public key registered on the blockchain for this center.');
-        return;
-      }
       
       setStatus('Fetching chunks and reassembling PDF...');
       
-      console.log('🔍 About to decrypt AES key:', {
-        encryptedKeyLength: encryptedKeyBase64.length,
-        encryptedKeyPreview: encryptedKeyBase64.substring(0, 50) + '...',
-        privateKeyLength: privKey.length,
-        privateKeyPreview: privKey.substring(0, 50) + '...',
-        keysMatchedBlockchain: true // We know this from the check above
-      });
-      
-      const pdfBlob = await reassemblePDF(paper.ipfsCIDs, encryptedKeyBase64, privKey);
+      // Use the new reassembler that works with time-locked keys
+      const pdfBlob = await reassemblePDF(paper.ipfsCIDs, timeLockedKeyJson, paper.unlockTimestamp.toNumber(), salt);
       
       setStatus('✅ Success! Opening PDF...');
       const url = URL.createObjectURL(pdfBlob);
@@ -337,11 +159,12 @@ const ExamCenterDashboard = () => {
     } catch (error) {
       console.error('Download failed:', error);
       
-      if (error.message.includes('Invalid RSAES-OAEP padding')) {
-        setStatus('❌ Decryption failed: This paper was encrypted with your OLD public key. The Authority needs to RE-SCHEDULE this paper with your current key.');
-        console.error('❌ RSA Padding Error: The encrypted AES key was created with a different public key than your current one. This happens when:');
-        console.error('1. The paper was scheduled before you re-registered your center');
-        console.error('2. The Authority needs to re-schedule this paper to encrypt it with your current public key');
+      if (error.message.includes('Time lock active')) {
+        setStatus(`⏰ Paper is still time-locked. ${error.message}`);
+      } else if (error.message.includes('Not assigned')) {
+        setStatus('❌ You are not assigned to this paper.');
+      } else if (error.message.includes('not unlocked yet')) {
+        setStatus('❌ Paper has not been unlocked yet. Click "Unlock Now" first.');
       } else {
         setStatus(`❌ Download failed: ${error.message}`);
       }
@@ -349,6 +172,8 @@ const ExamCenterDashboard = () => {
       setDownloadingId(null);
     }
   };
+
+
 
   const handleUnlock = async (paperId) => {
     try {
@@ -437,50 +262,6 @@ const ExamCenterDashboard = () => {
       <div className="flex justify-between items-center mb-4">
         <h2 className="text-2xl font-bold">Assigned Papers</h2>
         <div className="flex gap-2">
-          <button 
-            onClick={async () => {
-              try {
-                setStatus('🔧 Re-registering center...');
-                
-                // Generate fresh keys
-                const provider = new ethers.providers.Web3Provider(window.ethereum);
-                const signer = provider.getSigner();
-                const message = `Generate ChainSeal encryption keys for Exam Center\nAccount: ${account}`;
-                const signature = await signer.signMessage(message);
-                const keys = await generateDeterministicKeyPair(signature);
-                
-                // Store the new keys
-                localStorage.setItem(`chainseal_pub_${account}`, keys.publicKey);
-                localStorage.setItem(`chainseal_priv_${account}`, keys.privateKey);
-                
-                // Re-register with new keys
-                const tx = await contract.registerExamCenter('HBM101', ethers.utils.toUtf8Bytes(keys.publicKey));
-                await tx.wait();
-                
-                setStatus('✅ Center re-registered successfully!');
-                setTimeout(() => setStatus(''), 3000);
-              } catch (error) {
-                console.error('Re-registration failed:', error);
-                setStatus(`❌ Re-registration failed: ${error.message}`);
-              }
-            }}
-            className="btn-outline text-xs py-1 px-3 text-green-500"
-            title="Re-register this center with current MetaMask account keys"
-          >
-            🔧 Re-register Center
-          </button>
-          <button 
-            onClick={() => {
-              // Clear localStorage keys and reload
-              localStorage.removeItem(`chainseal_pub_${account}`);
-              localStorage.removeItem(`chainseal_priv_${account}`);
-              window.location.reload();
-            }} 
-            className="btn-outline text-xs py-1 px-3 text-yellow-500"
-            title="Clear stored keys and regenerate them"
-          >
-            🔑 Fix Keys
-          </button>
           <button onClick={fetchPapers} disabled={loading} className="btn-outline text-xs py-1 px-3">
             Refresh
           </button>

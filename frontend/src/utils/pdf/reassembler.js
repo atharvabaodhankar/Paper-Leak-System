@@ -1,17 +1,18 @@
 import axios from 'axios';
-import { decryptAES, decryptWithPrivateKey } from '../crypto';
+import { decryptAES, decryptTimeLockedKey } from '../crypto';
 
 /**
- * Reassemble a PDF from encrypted chunks on IPFS
+ * Reassemble a PDF from encrypted chunks on IPFS using time-locked keys
  * @param {string[]} cids List of IPFS CIDs
- * @param {string} encryptedKeyBase64 AES key encrypted with RSA Public Key
- * @param {string} privateKeyPem RSA Private Key
+ * @param {string} timeLockedKeyJson JSON string of time-locked AES key
+ * @param {number} unlockTimestamp Unix timestamp when key unlocks
+ * @param {string} salt Salt used for key derivation
  * @returns {Promise<Blob>} Reassembled PDF Blob
  */
-export const reassemblePDF = async (cids, encryptedKeyBase64, privateKeyPem) => {
+export const reassemblePDF = async (cids, timeLockedKeyJson, unlockTimestamp, salt) => {
   try {
-    // 1. Decrypt the AES key
-    const aesKey = decryptWithPrivateKey(encryptedKeyBase64, privateKeyPem);
+    // 1. Decrypt the time-locked AES key
+    const aesKey = await decryptTimeLockedKey(timeLockedKeyJson, unlockTimestamp, salt);
     
     const decryptedChunks = [];
     
