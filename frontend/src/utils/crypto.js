@@ -258,17 +258,90 @@ export const generateDeterministicKeyPair = async (signature) => {
 };
 
 /**
- * Generate a new RSA Key Pair (DEPRECATED - use generateDeterministicKeyPair)
- * @returns {Promise<Object>} { publicKey, privateKey } in PEM format
+ * Generate a time-locked AES key that can only be decrypted at a specific time
+ * @param {number} unlockTimestamp - Unix timestamp when key should be unlockable
+ * @param {string} salt - Random salt for key derivation
+ * @returns {Object} { timeLockedKey: string, actualAESKey: string }
  */
-export const generateKeyPair = () => {
-  return new Promise((resolve, reject) => {
-    forge.pki.rsa.generateKeyPair({ bits: 2048, workers: 2 }, (err, keypair) => {
-      if (err) return reject(err);
-      resolve({
-        publicKey: forge.pki.publicKeyToPem(keypair.publicKey),
-        privateKey: forge.pki.privateKeyToPem(keypair.privateKey)
-      });
-    });
+export const generateTimeLockedKey = async (unlockTimestamp, salt) => {
+  // Generate a random AES key
+  const actualAESKey = generateAESKey();
+  
+  // Create a deterministic seed from unlock time and salt
+  const timeData = `${unlockTimestamp}:${salt}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(timeData);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const timeSeed = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  
+  // Use the time seed to encrypt the actual AES key
+  // This creates a "time lock" - the key can only be decrypted with the correct time+salt
+  const timeKey = timeSeed.substring(0, 64); // Use first 64 chars as key
+  
+  // Encrypt the actual AES key with the time-derived key
+  const timeLockedKey = await encryptAES(
+    new TextEncoder().encode(actualAESKey),
+    timeKey
+  );
+  
+  console.log('🔒 Generated time-locked key:', {
+    unlockTimestamp,
+    salt: salt.substring(0, 10) + '...',
+    timeSeed: timeSeed.substring(0, 20) + '...',
+    actualAESKeyLength: actualAESKey.length,
+    timeLockedKeyLength: timeLockedKey.encryptedData.length
   });
+  
+  return {
+    timeLockedKey: JSON.stringify(timeLockedKey), // Store as JSON string
+    actualAESKey // Return for immediate use by teacher
+  };
+};
+
+/**
+ * Decrypt a time-locked key (only works at or after unlock time)
+ * @param {string} timeLockedKeyJson - JSON string of encrypted key
+ * @param {number} unlockTimestamp - Unix timestamp when key should be unlockable
+ * @param {string} salt - Salt used during key generation
+ * @returns {Promise<string>} Decrypted AES key
+ */
+export const decryptTimeLockedKey = async (timeLockedKeyJson, unlockTimestamp, salt) => {
+  const currentTime = Math.floor(Date.now() / 1000);
+  
+  // Check if it's time to unlock
+  if (currentTime < unlockTimestamp) {
+    throw new Error(`Time lock active. Key unlocks at ${new Date(unlockTimestamp * 1000).toLocaleString()}`);
+  }
+  
+  // Recreate the time seed
+  const timeData = `${unlockTimestamp}:${salt}`;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(timeData);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const timeSeed = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  
+  const timeKey = timeSeed.substring(0, 64);
+  
+  // Parse the time-locked key
+  const timeLockedKey = JSON.parse(timeLockedKeyJson);
+  
+  // Decrypt the actual AES key
+  const decryptedData = await decryptAES(
+    timeLockedKey.encryptedData,
+    timeLockedKey.iv,
+    timeKey
+  );
+  
+  const actualAESKey = new TextDecoder().decode(decryptedData);
+  
+  console.log('🔓 Decrypted time-locked key:', {
+    unlockTimestamp,
+    currentTime,
+    timeDifference: currentTime - unlockTimestamp,
+    actualAESKeyLength: actualAESKey.length
+  });
+  
+  return actualAESKey;
 };

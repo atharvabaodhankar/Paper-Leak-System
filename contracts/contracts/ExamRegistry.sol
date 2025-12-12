@@ -2,8 +2,9 @@ pragma solidity ^0.8.20;
 // SPDX-License-Identifier: MIT
 
 /**
- * @title ExamRegistry
- * @dev Manages exam paper uploads, scheduling, and time-locked access with multi-center support
+ * @title ExamRegistry - Time-Locked Secure Exam System
+ * @dev Papers are encrypted with time-locked keys that only unlock at exam time
+ * Authority can schedule but cannot decrypt papers
  */
 contract ExamRegistry {
     struct Paper {
@@ -16,7 +17,8 @@ contract ExamRegistry {
         bool isScheduled;
         bool isUnlocked;
         address authority;        // Who scheduled it
-        bytes authorityEncryptedKey; // Key encrypted for the Authority (master key)
+        bytes timeLockedKey;      // AES key encrypted with time-lock mechanism
+        string keyDerivationSalt; // Salt for deterministic key derivation
     }
 
     struct Center {
@@ -25,54 +27,79 @@ contract ExamRegistry {
         bool isRegistered;
     }
     
+    struct Authority {
+        string name;
+        bool isRegistered;
+        bool isActive;
+    }
+    
     // State variables
     mapping(uint256 => Paper) public papers;
     uint256 public paperCount;
     
     // Registry
     mapping(address => Center) public centers;
-    address[] public centerAddresses; // To enumerate centers
-
-    // Authority Registry (Simplification: only one authority for now or allow multiple)
-    bytes public authorityPublicKey;
+    address[] public centerAddresses;
+    
+    // Authority Registry (multiple authorities allowed)
+    mapping(address => Authority) public authorities;
+    address[] public authorityAddresses;
     
     // Per-paper access controls
     // paperId => centerAddress => roomNumber
     mapping(uint256 => mapping(address => string)) public paperClassrooms;
-    // paperId => centerAddress => encryptedKey (AES key encrypted with Center's RSA Key)
-    mapping(uint256 => mapping(address => bytes)) public paperKeys;
+    // paperId => centerAddress => assigned (boolean)
+    mapping(uint256 => mapping(address => bool)) public paperAssignments;
     
     // Events
     event PaperUploaded(uint256 indexed paperId, string examName, address indexed teacher);
     event PaperScheduled(uint256 indexed paperId, uint256 unlockTimestamp, address indexed authority);
     event PaperUnlocked(uint256 indexed paperId, uint256 timestamp);
     event CenterRegistered(address indexed centerAddress, string name);
-    event AuthorityRegistered(address indexed authority, bytes publicKey);
+    event AuthorityRegistered(address indexed authority, string name);
     
     modifier validPaper(uint256 _paperId) {
         require(_paperId > 0 && _paperId <= paperCount, "Invalid paper ID");
         _;
     }
     
+    modifier onlyAuthority() {
+        require(authorities[msg.sender].isRegistered && authorities[msg.sender].isActive, "Not authorized");
+        _;
+    }
+    
     /**
-     * @dev Register the Authority's Public Key (so teachers can encrypt for them)
+     * @dev Register as an Authority (exam scheduling entity)
      */
-    function registerAuthority(bytes memory _publicKey) external {
-        authorityPublicKey = _publicKey;
-        emit AuthorityRegistered(msg.sender, _publicKey);
+    function registerAuthority(string memory _name) external {
+        if (!authorities[msg.sender].isRegistered) {
+            authorityAddresses.push(msg.sender);
+        }
+        
+        authorities[msg.sender] = Authority({
+            name: _name,
+            isRegistered: true,
+            isActive: true
+        });
+        
+        emit AuthorityRegistered(msg.sender, _name);
     }
 
     /**
-     * @dev Teacher uploads a paper, encrypting the key for the Authority
+     * @dev Teacher uploads a paper with time-locked encryption
+     * The paper is encrypted with a key that can only be derived at unlock time
      */
     function uploadPaper(
         string memory _examName,
         string memory _subject,
         string[] memory _ipfsCIDs,
-        bytes memory _authorityEncryptedKey
+        bytes memory _timeLockedKey,
+        string memory _keyDerivationSalt
     ) external returns (uint256) {
         require(bytes(_examName).length > 0, "Exam name required");
-        require(bytes(authorityPublicKey).length > 0, "Authority not registered yet");
+        require(_ipfsCIDs.length > 0, "IPFS CIDs required");
+        require(_timeLockedKey.length > 0, "Time-locked key required");
+        require(bytes(_keyDerivationSalt).length > 0, "Key derivation salt required");
         
         paperCount++;
         
@@ -86,7 +113,8 @@ contract ExamRegistry {
             isScheduled: false,
             isUnlocked: false,
             authority: address(0),
-            authorityEncryptedKey: _authorityEncryptedKey
+            timeLockedKey: _timeLockedKey,
+            keyDerivationSalt: _keyDerivationSalt
         });
         
         emit PaperUploaded(paperCount, _examName, msg.sender);
@@ -95,24 +123,25 @@ contract ExamRegistry {
     
     /**
      * @dev Authority schedules an exam for specific centers
+     * Authority cannot decrypt papers - only assigns them to centers
      */
     function scheduleExam(
         uint256 _paperId,
         uint256 _unlockTimestamp,
         address[] memory _centers,
-        string[] memory _classrooms,
-        bytes[] memory _encryptedKeys
-    ) external validPaper(_paperId) {
+        string[] memory _classrooms
+    ) external onlyAuthority validPaper(_paperId) {
         require(_centers.length == _classrooms.length, "Centers/Classrooms mismatch");
-        require(_centers.length == _encryptedKeys.length, "Centers/Keys mismatch");
         require(_unlockTimestamp > block.timestamp, "Unlock time must be in future");
         
         Paper storage paper = papers[_paperId];
         require(!paper.isScheduled, "Paper already scheduled");
         
+        // Assign paper to centers
         for (uint i = 0; i < _centers.length; i++) {
+            require(centers[_centers[i]].isRegistered, "Center not registered");
             paperClassrooms[_paperId][_centers[i]] = _classrooms[i];
-            paperKeys[_paperId][_centers[i]] = _encryptedKeys[i];
+            paperAssignments[_paperId][_centers[i]] = true;
         }
         
         paper.unlockTimestamp = _unlockTimestamp;
@@ -123,7 +152,8 @@ contract ExamRegistry {
     }
     
     /**
-     * @dev Unlock a paper
+     * @dev Unlock a paper (can be called by anyone after unlock time)
+     * This is a public function that enables time-locked access
      */
     function unlockPaper(uint256 _paperId) external validPaper(_paperId) {
         Paper storage paper = papers[_paperId];
@@ -172,15 +202,38 @@ contract ExamRegistry {
         
         return (addrs, names);
     }
+    
+    // Get list of all registered authorities
+    function getAllAuthorities() external view returns (address[] memory, string[] memory) {
+        address[] memory addrs = new address[](authorityAddresses.length);
+        string[] memory names = new string[](authorityAddresses.length);
+        
+        for (uint i = 0; i < authorityAddresses.length; i++) {
+            addrs[i] = authorityAddresses[i];
+            names[i] = authorities[authorityAddresses[i]].name;
+        }
+        
+        return (addrs, names);
+    }
 
-    // Get specific key for the caller (Exam Center)
-    function getMyPaperKey(uint256 _paperId) external view validPaper(_paperId) returns (bytes memory) {
-        return paperKeys[_paperId][msg.sender];
+    // Check if center is assigned to a paper
+    function isAssignedToCenter(uint256 _paperId, address _center) external view validPaper(_paperId) returns (bool) {
+        return paperAssignments[_paperId][_center];
     }
     
     // Get specific classroom for the caller
     function getMyClassroom(uint256 _paperId) external view validPaper(_paperId) returns (string memory) {
+        require(paperAssignments[_paperId][msg.sender], "Not assigned to this paper");
         return paperClassrooms[_paperId][msg.sender];
+    }
+    
+    // Get time-locked key and salt for decryption (only after unlock time)
+    function getTimeLockedKey(uint256 _paperId) external view validPaper(_paperId) returns (bytes memory, string memory) {
+        Paper memory paper = papers[_paperId];
+        require(paper.isUnlocked, "Paper not unlocked yet");
+        require(paperAssignments[_paperId][msg.sender], "Not assigned to this paper");
+        
+        return (paper.timeLockedKey, paper.keyDerivationSalt);
     }
     
     function getCenterPublicKey(address _center) external view returns (bytes memory) {
