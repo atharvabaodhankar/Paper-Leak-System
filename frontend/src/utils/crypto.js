@@ -305,45 +305,88 @@ export const generateTimeLockedKey = async (unlockTimestamp, salt) => {
 export const decryptTimeLockedKey = async (timeLockedKeyJson, unlockTimestamp, salt) => {
   const currentTime = Math.floor(Date.now() / 1000);
   
+  console.log('🔓 Attempting to decrypt time-locked key:', {
+    currentTime,
+    unlockTimestamp,
+    timeDifference: currentTime - unlockTimestamp,
+    canUnlock: currentTime >= unlockTimestamp,
+    timeLockedKeyLength: timeLockedKeyJson?.length,
+    saltLength: salt?.length
+  });
+  
   // Check if it's time to unlock
   if (currentTime < unlockTimestamp) {
     throw new Error(`Time lock active. Key unlocks at ${new Date(unlockTimestamp * 1000).toLocaleString()}`);
   }
   
-  // Recreate the time seed
-  const timeData = `${unlockTimestamp}:${salt}`;
-  const encoder = new TextEncoder();
-  const data = encoder.encode(timeData);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-  const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const timeSeed = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-  
-  // Recreate the time key
-  const timeKeyHex = timeSeed.substring(0, 64);
-  const timeKeyBytes = new Uint8Array(32);
-  for (let i = 0; i < 32; i++) {
-    timeKeyBytes[i] = parseInt(timeKeyHex.substring(i * 2, i * 2 + 2), 16);
+  try {
+    // Recreate the time seed
+    const timeData = `${unlockTimestamp}:${salt}`;
+    const encoder = new TextEncoder();
+    const data = encoder.encode(timeData);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+    const hashArray = Array.from(new Uint8Array(hashBuffer));
+    const timeSeed = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    
+    console.log('🔍 Time seed recreation:', {
+      timeData: timeData.substring(0, 50) + '...',
+      timeSeedLength: timeSeed.length,
+      timeSeedPreview: timeSeed.substring(0, 20) + '...'
+    });
+    
+    // Recreate the time key
+    const timeKeyHex = timeSeed.substring(0, 64);
+    const timeKeyBytes = new Uint8Array(32);
+    for (let i = 0; i < 32; i++) {
+      timeKeyBytes[i] = parseInt(timeKeyHex.substring(i * 2, i * 2 + 2), 16);
+    }
+    const timeKey = arrayToBase64(timeKeyBytes);
+    
+    console.log('🔑 Time key recreation:', {
+      timeKeyHex: timeKeyHex.substring(0, 20) + '...',
+      timeKeyLength: timeKey.length
+    });
+    
+    // Parse the time-locked key
+    let timeLockedKey;
+    try {
+      timeLockedKey = JSON.parse(timeLockedKeyJson);
+      console.log('📦 Parsed time-locked key:', {
+        hasIv: !!timeLockedKey.iv,
+        hasEncryptedData: !!timeLockedKey.encryptedData,
+        ivLength: timeLockedKey.iv?.length,
+        encryptedDataLength: timeLockedKey.encryptedData?.length
+      });
+    } catch (parseError) {
+      console.error('❌ Failed to parse time-locked key JSON:', parseError);
+      throw new Error(`Invalid time-locked key format: ${parseError.message}`);
+    }
+    
+    // Decrypt the actual AES key
+    console.log('🔓 About to decrypt AES key...');
+    const decryptedData = await decryptAES(
+      timeLockedKey.encryptedData,
+      timeLockedKey.iv,
+      timeKey
+    );
+    
+    const actualAESKey = new TextDecoder().decode(decryptedData);
+    
+    console.log('✅ Successfully decrypted time-locked key:', {
+      unlockTimestamp,
+      currentTime,
+      timeDifference: currentTime - unlockTimestamp,
+      actualAESKeyLength: actualAESKey.length
+    });
+    
+    return actualAESKey;
+  } catch (error) {
+    console.error('❌ Time-locked key decryption failed:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack?.substring(0, 200)
+    });
+    throw new Error(`Time-locked key decryption failed: ${error.message}`);
   }
-  const timeKey = arrayToBase64(timeKeyBytes);
-  
-  // Parse the time-locked key
-  const timeLockedKey = JSON.parse(timeLockedKeyJson);
-  
-  // Decrypt the actual AES key
-  const decryptedData = await decryptAES(
-    timeLockedKey.encryptedData,
-    timeLockedKey.iv,
-    timeKey
-  );
-  
-  const actualAESKey = new TextDecoder().decode(decryptedData);
-  
-  console.log('🔓 Decrypted time-locked key:', {
-    unlockTimestamp,
-    currentTime,
-    timeDifference: currentTime - unlockTimestamp,
-    actualAESKeyLength: actualAESKey.length
-  });
-  
-  return actualAESKey;
 };

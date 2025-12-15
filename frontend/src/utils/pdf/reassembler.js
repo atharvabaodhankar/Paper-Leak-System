@@ -11,22 +11,49 @@ import { decryptAES, decryptTimeLockedKey } from '../crypto';
  */
 export const reassemblePDF = async (cids, timeLockedKeyJson, unlockTimestamp, salt) => {
   try {
+    console.log('🔧 Starting PDF reassembly with time-locked key:', {
+      cidsCount: cids?.length,
+      timeLockedKeyLength: timeLockedKeyJson?.length,
+      unlockTimestamp,
+      saltLength: salt?.length,
+      currentTime: Math.floor(Date.now() / 1000)
+    });
+    
     // 1. Decrypt the time-locked AES key
+    console.log('🔓 Step 1: Decrypting time-locked AES key...');
     const aesKey = await decryptTimeLockedKey(timeLockedKeyJson, unlockTimestamp, salt);
+    console.log('✅ AES key decrypted successfully, length:', aesKey.length);
     
     const decryptedChunks = [];
     
     // 2. Fetch and decrypt each chunk
-    for (const cid of cids) {
-      // Pinata gateway or public gateway
-      const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${cid}`);
-      const { iv, encryptedData } = response.data;
+    console.log('📦 Step 2: Fetching and decrypting chunks...');
+    for (let i = 0; i < cids.length; i++) {
+      const cid = cids[i];
+      console.log(`📥 Fetching chunk ${i + 1}/${cids.length}: ${cid}`);
       
-      const decryptedChunk = await decryptAES(encryptedData, iv, aesKey);
-      decryptedChunks.push(decryptedChunk);
+      try {
+        // Pinata gateway or public gateway
+        const response = await axios.get(`https://gateway.pinata.cloud/ipfs/${cid}`);
+        const { iv, encryptedData } = response.data;
+        
+        console.log(`🔓 Decrypting chunk ${i + 1}:`, {
+          ivLength: iv?.length,
+          encryptedDataLength: encryptedData?.length
+        });
+        
+        const decryptedChunk = await decryptAES(encryptedData, iv, aesKey);
+        decryptedChunks.push(decryptedChunk);
+        
+        console.log(`✅ Chunk ${i + 1} decrypted successfully, size:`, decryptedChunk.length);
+      } catch (chunkError) {
+        console.error(`❌ Failed to process chunk ${i + 1}:`, chunkError);
+        throw new Error(`Failed to process chunk ${i + 1}: ${chunkError.message}`);
+      }
     }
     
     // 3. Merge chunks
+    console.log('🔗 Step 3: Merging chunks...');
     const totalLength = decryptedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
     const mergedArray = new Uint8Array(totalLength);
     
@@ -36,9 +63,20 @@ export const reassemblePDF = async (cids, timeLockedKeyJson, unlockTimestamp, sa
       offset += chunk.length;
     }
     
+    console.log('✅ PDF reassembly completed successfully:', {
+      totalChunks: decryptedChunks.length,
+      totalSize: totalLength,
+      finalBlobSize: mergedArray.length
+    });
+    
     return new Blob([mergedArray], { type: 'application/pdf' });
   } catch (error) {
-    console.error('Reassembly failed:', error);
+    console.error('❌ PDF reassembly failed:', error);
+    console.error('Error details:', {
+      name: error.name,
+      message: error.message,
+      stack: error.stack?.substring(0, 300)
+    });
     throw error;
   }
 };
