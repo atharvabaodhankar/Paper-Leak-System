@@ -33,20 +33,16 @@ const PaperUpload = ({ onUploadSuccess }) => {
 
     try {
       setLoading(true);
-      setStatus('🔒 Generating time-locked encryption keys...');
+      setStatus('🔒 Generating temporary encryption...');
       
-      // Generate a future unlock time (for demo, set to 1 hour from now)
-      // In production, this would be set by the Authority during scheduling
-      const futureUnlockTime = Math.floor(Date.now() / 1000) + (60 * 60); // 1 hour from now
-      const salt = Math.random().toString(36).substring(2, 15); // Random salt
-      
-      // Generate time-locked key
-      const { timeLockedKey, actualAESKey } = await generateTimeLockedKey(futureUnlockTime, salt);
+      // Generate a regular AES key - Authority will create the time-locked version during scheduling
+      const { generateAESKey } = await import('../../utils/crypto');
+      const aesKey = generateAESKey();
       
       setStatus('📄 Processing and encrypting PDF...');
       
-      // Process PDF with the actual AES key
-      const { chunks } = await processPDF(file, actualAESKey);
+      // Process PDF with the AES key
+      const { chunks } = await processPDF(file, aesKey);
       
       setStatus(`☁️ Uploading ${chunks.length} encrypted chunks to IPFS...`);
       const ipfsCIDs = [];
@@ -59,15 +55,17 @@ const PaperUpload = ({ onUploadSuccess }) => {
 
       setStatus('⛓️ Submitting to blockchain...');
       
-      // Convert time-locked key to bytes for blockchain storage
-      const timeLockedKeyBytes = ethers.utils.toUtf8Bytes(timeLockedKey);
+      // Store the raw AES key temporarily - Authority will convert it to time-locked during scheduling
+      const tempTimeLockedKey = JSON.stringify({ rawAESKey: aesKey });
+      const timeLockedKeyBytes = ethers.utils.toUtf8Bytes(tempTimeLockedKey);
+      const tempSalt = 'temp-salt'; // Temporary salt, will be replaced during scheduling
       
       const tx = await contract.uploadPaper(
         examName,
         subject,
         ipfsCIDs,
         timeLockedKeyBytes,
-        salt
+        tempSalt
       );
       
       setStatus('⏳ Waiting for blockchain confirmation...');

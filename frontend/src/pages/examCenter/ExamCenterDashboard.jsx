@@ -134,7 +134,19 @@ const ExamCenterDashboard = () => {
       
       // Get the time-locked key and salt from the contract
       const [timeLockedKeyBytes, salt] = await contract.getTimeLockedKey(paper.id);
-      const timeLockedKeyJson = ethers.utils.toUtf8String(timeLockedKeyBytes);
+      
+      // The blockchain returns hex-encoded bytes, we need to decode them properly
+      let timeLockedKeyJson;
+      try {
+        // Try to decode as UTF-8 string first
+        timeLockedKeyJson = ethers.utils.toUtf8String(timeLockedKeyBytes);
+      } catch (utf8Error) {
+        console.log('🔍 UTF-8 decoding failed, trying hex decode:', utf8Error.message);
+        // If UTF-8 fails, try to decode as hex
+        const hexString = timeLockedKeyBytes.startsWith('0x') ? timeLockedKeyBytes.slice(2) : timeLockedKeyBytes;
+        const bytes = ethers.utils.arrayify('0x' + hexString);
+        timeLockedKeyJson = new TextDecoder().decode(bytes);
+      }
       
       console.log('🔍 Raw blockchain data:', {
         paperId: paper.id,

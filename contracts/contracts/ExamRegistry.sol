@@ -122,14 +122,16 @@ contract ExamRegistry {
     }
     
     /**
-     * @dev Authority schedules an exam for specific centers
-     * Authority cannot decrypt papers - only assigns them to centers
+     * @dev Authority schedules an exam for specific centers and updates the time-locked key
+     * Authority cannot decrypt papers - only assigns them to centers with proper time-lock
      */
     function scheduleExam(
         uint256 _paperId,
         uint256 _unlockTimestamp,
         address[] memory _centers,
-        string[] memory _classrooms
+        string[] memory _classrooms,
+        bytes memory _newTimeLockedKey,
+        string memory _newSalt
     ) external onlyAuthority validPaper(_paperId) {
         require(_centers.length == _classrooms.length, "Centers/Classrooms mismatch");
         require(_unlockTimestamp > block.timestamp, "Unlock time must be in future");
@@ -144,6 +146,9 @@ contract ExamRegistry {
             paperAssignments[_paperId][_centers[i]] = true;
         }
         
+        // Update the time-locked key with the proper unlock timestamp
+        paper.timeLockedKey = _newTimeLockedKey;
+        paper.keyDerivationSalt = _newSalt;
         paper.unlockTimestamp = _unlockTimestamp;
         paper.isScheduled = true;
         paper.authority = msg.sender;

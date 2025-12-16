@@ -105,13 +105,65 @@ const AuthorityDashboard = () => {
 
   const handleSchedule = async (paperId, unlockTimestamp, centers, classrooms) => {
     try {
-      setTxStatus('Initiating transaction...');
-      const tx = await contract.scheduleExam(paperId, unlockTimestamp, centers, classrooms);
+      setTxStatus('Retrieving paper data...');
+      
+      // Get the paper to extract the raw AES key
+      const paper = await contract.getPaper(paperId);
+      const tempTimeLockedKeyJson = ethers.utils.toUtf8String(paper.timeLockedKey);
+      
+      console.log('🔍 Authority scheduling - extracting raw AES key:', {
+        paperId,
+        tempTimeLockedKeyJson: tempTimeLockedKeyJson.substring(0, 100) + '...'
+      });
+      
+      // Parse the temporary time-locked key to get the raw AES key
+      let rawAESKey;
+      try {
+        const tempData = JSON.parse(tempTimeLockedKeyJson);
+        rawAESKey = tempData.rawAESKey;
+      } catch (parseError) {
+        console.error('Failed to parse temp time-locked key:', parseError);
+        throw new Error('Invalid paper format - cannot extract AES key');
+      }
+      
+      if (!rawAESKey) {
+        throw new Error('No raw AES key found in paper data');
+      }
+      
+      setTxStatus('Generating time-locked encryption...');
+      
+      // Generate new salt for this scheduling
+      const newSalt = Math.random().toString(36).substring(2, 15);
+      
+      // Create proper time-locked key with the Authority's chosen unlock timestamp
+      const { generateTimeLockedKey } = await import('../../utils/crypto');
+      const { timeLockedKey } = await generateTimeLockedKey(unlockTimestamp, newSalt, rawAESKey);
+      
+      console.log('🔒 Authority created time-locked key:', {
+        unlockTimestamp,
+        newSalt,
+        timeLockedKeyLength: timeLockedKey.length
+      });
+      
+      setTxStatus('Submitting to blockchain...');
+      
+      // Convert to bytes for blockchain storage
+      const timeLockedKeyBytes = ethers.utils.toUtf8Bytes(timeLockedKey);
+      
+      // Call the updated scheduleExam method with the new time-locked key
+      const tx = await contract.scheduleExam(
+        paperId, 
+        unlockTimestamp, 
+        centers, 
+        classrooms,
+        timeLockedKeyBytes,
+        newSalt
+      );
       
       setTxStatus('Waiting for blockchain confirmation...');
       await tx.wait();
       
-      setTxStatus('Success! Exam scheduled.');
+      setTxStatus('Success! Exam scheduled with time-locked encryption.');
       setSelectedPaper(null);
       fetchAllPapers();
       

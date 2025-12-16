@@ -252,11 +252,12 @@ export const generateDeterministicKeyPair = async (signature) => {
  * Generate a time-locked AES key that can only be decrypted at a specific time
  * @param {number} unlockTimestamp - Unix timestamp when key should be unlockable
  * @param {string} salt - Random salt for key derivation
+ * @param {string} existingAESKey - Optional existing AES key to use instead of generating new one
  * @returns {Object} { timeLockedKey: string, actualAESKey: string }
  */
-export const generateTimeLockedKey = async (unlockTimestamp, salt) => {
-  // Generate a random AES key
-  const actualAESKey = generateAESKey();
+export const generateTimeLockedKey = async (unlockTimestamp, salt, existingAESKey = null) => {
+  // Use existing key or generate a new one
+  const actualAESKey = existingAESKey || generateAESKey();
   
   // Create a deterministic seed from unlock time and salt
   const timeData = `${unlockTimestamp}:${salt}`;
@@ -286,7 +287,8 @@ export const generateTimeLockedKey = async (unlockTimestamp, salt) => {
     timeSeed: timeSeed.substring(0, 20) + '...',
     timeKeyLength: timeKey.length,
     actualAESKeyLength: actualAESKey.length,
-    timeLockedKeyLength: timeLockedKey.encryptedData.length
+    timeLockedKeyLength: timeLockedKey.encryptedData.length,
+    usingExistingKey: !!existingAESKey
   });
   
   return {
@@ -367,22 +369,36 @@ export const decryptTimeLockedKey = async (timeLockedKeyJson, unlockTimestamp, s
     
     // Decrypt the actual AES key
     console.log('🔓 About to decrypt AES key...');
-    const decryptedData = await decryptAES(
-      timeLockedKey.encryptedData,
-      timeLockedKey.iv,
-      timeKey
-    );
-    
-    const actualAESKey = new TextDecoder().decode(decryptedData);
-    
-    console.log('✅ Successfully decrypted time-locked key:', {
-      unlockTimestamp,
-      currentTime,
-      timeDifference: currentTime - unlockTimestamp,
-      actualAESKeyLength: actualAESKey.length
-    });
-    
-    return actualAESKey;
+    try {
+      const decryptedData = await decryptAES(
+        timeLockedKey.encryptedData,
+        timeLockedKey.iv,
+        timeKey
+      );
+      
+      const actualAESKey = new TextDecoder().decode(decryptedData);
+      
+      console.log('✅ Successfully decrypted time-locked key:', {
+        unlockTimestamp,
+        currentTime,
+        timeDifference: currentTime - unlockTimestamp,
+        actualAESKeyLength: actualAESKey.length
+      });
+      
+      return actualAESKey;
+    } catch (aesError) {
+      console.error('❌ AES decryption failed with details:', {
+        errorName: aesError.name,
+        errorMessage: aesError.message,
+        timeKeyLength: timeKey.length,
+        ivLength: timeLockedKey.iv.length,
+        encryptedDataLength: timeLockedKey.encryptedData.length,
+        timeKeyPreview: timeKey.substring(0, 20) + '...',
+        ivValue: timeLockedKey.iv,
+        encryptedDataPreview: timeLockedKey.encryptedData.substring(0, 20) + '...'
+      });
+      throw aesError;
+    }
   } catch (error) {
     console.error('❌ Time-locked key decryption failed:', error);
     console.error('Error details:', {

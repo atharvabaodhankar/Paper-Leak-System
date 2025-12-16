@@ -1,4 +1,4 @@
-export const EXAM_REGISTRY_ADDRESS = "0x550447A2a9226dfd8DB2c3f8c36CaBD56cA1CE99";
+export const EXAM_REGISTRY_ADDRESS = "0xa577F1767cCf9e209684d8ced928e26120bb0293";
 
 export const EXAM_REGISTRY_ABI = [
   {
@@ -579,6 +579,16 @@ export const EXAM_REGISTRY_ABI = [
         "internalType": "string[]",
         "name": "_classrooms",
         "type": "string[]"
+      },
+      {
+        "internalType": "bytes",
+        "name": "_newTimeLockedKey",
+        "type": "bytes"
+      },
+      {
+        "internalType": "string",
+        "name": "_newSalt",
+        "type": "string"
       }
     ],
     "name": "scheduleExam",
