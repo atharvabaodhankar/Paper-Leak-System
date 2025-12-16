@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useWeb3 } from '../../context/Web3Context';
 import ScheduleExamModal from '../../components/authority/ScheduleExamModal';
+import { ethers } from 'ethers';
 
 const AuthorityDashboard = () => {
   const { contract, account } = useWeb3();
