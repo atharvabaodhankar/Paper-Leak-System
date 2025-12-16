@@ -36,11 +36,15 @@ export const reassemblePDF = async (cids, timeLockedKeyJson, unlockTimestamp, sa
         // Try Pinata gateway first, fallback to public gateway
         let response;
         try {
-          response = await axios.get(`https://gateway.pinata.cloud/ipfs/${cid}`);
+          response = await axios.get(`https://gateway.pinata.cloud/ipfs/${cid}`, {
+            withCredentials: false // Disable credentials to avoid CORS issues
+          });
         } catch (pinataError) {
           console.log(`📡 Pinata failed, trying public gateway for ${cid}:`, pinataError.message);
           // Fallback to public IPFS gateway
-          response = await axios.get(`https://ipfs.io/ipfs/${cid}`);
+          response = await axios.get(`https://ipfs.io/ipfs/${cid}`, {
+            withCredentials: false
+          });
         }
         const { iv, encryptedData } = response.data;
         
