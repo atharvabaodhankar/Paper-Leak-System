@@ -33,18 +33,35 @@ export const reassemblePDF = async (cids, timeLockedKeyJson, unlockTimestamp, sa
       console.log(`📥 Fetching chunk ${i + 1}/${cids.length}: ${cid}`);
       
       try {
-        // Try Pinata gateway first, fallback to public gateway
+        // Try Dedicated Gateway first (if configured), then Pinata public, then fallback
         let response;
+        const dedicatedGateway = import.meta.env.VITE_GATEWAY_URL;
+        const gatewayKey = import.meta.env.VITE_GATEWAY_KEY;
+
         try {
-          response = await axios.get(`https://gateway.pinata.cloud/ipfs/${cid}`, {
-            withCredentials: false // Disable credentials to avoid CORS issues
-          });
-        } catch (pinataError) {
-          console.log(`📡 Pinata failed, trying public gateway for ${cid}:`, pinataError.message);
-          // Fallback to public IPFS gateway
-          response = await axios.get(`https://ipfs.io/ipfs/${cid}`, {
-            withCredentials: false
-          });
+          if (dedicatedGateway && gatewayKey) {
+             console.log(`🚀 Using Dedicated Gateway: ${dedicatedGateway}`);
+             response = await axios.get(`https://${dedicatedGateway}/ipfs/${cid}?pinataGatewayToken=${gatewayKey}`, {
+                withCredentials: false
+             });
+          } else {
+             throw new Error('Dedicated gateway not configured');
+          }
+        } catch (gatewayError) {
+          console.log(`⚠️ Dedicated Gateway failed/missing, trying public gateway for ${cid}:`, gatewayError.message);
+          
+          try {
+             // Try Pinata public gateway
+             response = await axios.get(`https://gateway.pinata.cloud/ipfs/${cid}`, {
+               withCredentials: false 
+             });
+          } catch (pinataError) {
+             console.log(`📡 Pinata public failed, trying generic fallback for ${cid}:`, pinataError.message);
+             // Fallback to generic IPFS gateway
+             response = await axios.get(`https://ipfs.io/ipfs/${cid}`, {
+               withCredentials: false
+             });
+          }
         }
         const { iv, encryptedData } = response.data;
         
