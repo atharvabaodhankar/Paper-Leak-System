@@ -1,7 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useWeb3 } from '../../context/Web3Context';
 import { reassemblePDF } from '../../utils/pdf/reassembler';
+import { combineShares } from '../../utils/shamirSecretSharing';
+import { decryptKeyWithMasterKey, decryptAES } from '../../utils/crypto';
 import { ethers } from 'ethers';
+import axios from 'axios';
 
 const ExamCenterDashboard = () => {
   const { contract, account } = useWeb3();
@@ -130,40 +133,93 @@ const ExamCenterDashboard = () => {
   const handleDownload = async (paper) => {
     try {
       setDownloadingId(paper.id);
-      setStatus('Fetching time-locked key...');
+      setStatus('🔐 Fetching decryption shares from blockchain...');
       
-      // Get the time-locked key and salt from the contract
-      const [timeLockedKeyBytes, salt] = await contract.getTimeLockedKey(paper.id);
+      // Get the encrypted K1 and master key shares from the contract
+      const [encryptedK1Bytes, shareBytes, threshold] = await contract.getDecryptionShares(paper.id);
       
-      // The blockchain returns hex-encoded bytes, we need to decode them properly
-      let timeLockedKeyJson;
-      try {
-        // Try to decode as UTF-8 string first
-        timeLockedKeyJson = ethers.utils.toUtf8String(timeLockedKeyBytes);
-      } catch (utf8Error) {
-        console.log('🔍 UTF-8 decoding failed, trying hex decode:', utf8Error.message);
-        // If UTF-8 fails, try to decode as hex
-        const hexString = timeLockedKeyBytes.startsWith('0x') ? timeLockedKeyBytes.slice(2) : timeLockedKeyBytes;
-        const bytes = ethers.utils.arrayify('0x' + hexString);
-        timeLockedKeyJson = new TextDecoder().decode(bytes);
-      }
+      // Decode the data
+      const encryptedK1BytesArray = ethers.utils.arrayify(encryptedK1Bytes);
+      const encryptedK1 = new TextDecoder().decode(encryptedK1BytesArray);
       
-      console.log('🔍 Raw blockchain data:', {
+      const shares = shareBytes.map(bytes => {
+        const arr = ethers.utils.arrayify(bytes);
+        return new TextDecoder().decode(arr);
+      });
+      
+      console.log('🔍 Decryption data from blockchain:', {
         paperId: paper.id,
-        timeLockedKeyBytesLength: timeLockedKeyBytes.length,
-        timeLockedKeyBytesHex: timeLockedKeyBytes.substring(0, 100) + '...',
-        saltLength: salt.length,
-        saltValue: salt,
-        timeLockedKeyJsonLength: timeLockedKeyJson.length,
-        timeLockedKeyJsonPreview: timeLockedKeyJson.substring(0, 100) + '...',
+        encryptedK1Length: encryptedK1.length,
+        sharesCount: shares.length,
+        threshold,
         unlockTimestamp: paper.unlockTimestamp.toNumber(),
         currentTime: Math.floor(Date.now() / 1000)
       });
       
-      setStatus('Fetching chunks and reassembling PDF...');
+      setStatus('🗂️ Reconstructing Master Key (K2) from Shamir shares...');
       
-      // Use the new reassembler that works with time-locked keys
-      const pdfBlob = await reassemblePDF(paper.ipfsCIDs, timeLockedKeyJson, paper.unlockTimestamp.toNumber(), salt);
+      // Combine shares to get the master key (K2)
+      // This will only work if we have enough shares
+      const masterKey = combineShares(shares);
+      
+      setStatus('🔓 Decrypting Paper Key (K1) using Master Key...');
+      
+      // Decrypt K1 using K2
+      const aesKey = await decryptKeyWithMasterKey(encryptedK1, masterKey);
+      
+      console.log('✅ Master key reconstruction and K1 decryption successful');
+      
+      setStatus('📦 Fetching and decrypting PDF chunks from IPFS...');
+      
+      // Now use the decrypted AES key (K1) to reassemble the PDF
+      
+      const decryptedChunks = [];
+      for (let i = 0; i < paper.ipfsCIDs.length; i++) {
+        const cid = paper.ipfsCIDs[i];
+        console.log(`📥 Fetching chunk ${i + 1}/${paper.ipfsCIDs.length}: ${cid}`);
+        
+        // Try dedicated gateway first, then fallback
+        let response;
+        const dedicatedGateway = import.meta.env.VITE_GATEWAY_URL;
+        const gatewayKey = import.meta.env.VITE_GATEWAY_KEY;
+
+        try {
+          if (dedicatedGateway && gatewayKey) {
+            response = await axios.get(`https://${dedicatedGateway}/ipfs/${cid}?pinataGatewayToken=${gatewayKey}`, {
+              withCredentials: false
+            });
+          } else {
+            throw new Error('Dedicated gateway not configured');
+          }
+        } catch (gatewayError) {
+          try {
+            response = await axios.get(`https://gateway.pinata.cloud/ipfs/${cid}`, {
+              withCredentials: false 
+            });
+          } catch (pinataError) {
+            response = await axios.get(`https://ipfs.io/ipfs/${cid}`, {
+              withCredentials: false
+            });
+          }
+        }
+        
+        const { iv, encryptedData } = response.data;
+        const decryptedChunk = await decryptAES(encryptedData, iv, aesKey);
+        decryptedChunks.push(decryptedChunk);
+        
+        setStatus(`📦 Decrypted chunk ${i + 1}/${paper.ipfsCIDs.length}...`);
+      }
+      
+      // Merge chunks
+      const totalLength = decryptedChunks.reduce((acc, chunk) => acc + chunk.length, 0);
+      const mergedArray = new Uint8Array(totalLength);
+      let offset = 0;
+      for (const chunk of decryptedChunks) {
+        mergedArray.set(chunk, offset);
+        offset += chunk.length;
+      }
+      
+      const pdfBlob = new Blob([mergedArray], { type: 'application/pdf' });
       
       setStatus('✅ Success! Opening PDF...');
       const url = URL.createObjectURL(pdfBlob);
@@ -179,14 +235,12 @@ const ExamCenterDashboard = () => {
     } catch (error) {
       console.error('Download failed:', error);
       
-      if (error.message.includes('Time-locked key decryption failed')) {
-        setStatus('❌ This paper was created with an older system version. Please ask the Authority to re-schedule this paper with the current system, or upload a new paper.');
-      } else if (error.message.includes('Time lock active')) {
-        setStatus(`⏰ Paper is still time-locked. ${error.message}`);
+      if (error.message.includes('Access denied') || error.message.includes('Time-lock active')) {
+        setStatus(`⏰ ${error.message}`);
       } else if (error.message.includes('Not assigned')) {
         setStatus('❌ You are not assigned to this paper.');
       } else if (error.message.includes('not unlocked yet')) {
-        setStatus('❌ Paper has not been unlocked yet. Click "Unlock Now" first.');
+        setStatus('❌ Paper has not been unlocked yet. Click \"Unlock Now\" first.');
       } else {
         setStatus(`❌ Download failed: ${error.message}`);
       }
