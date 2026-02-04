@@ -1,19 +1,18 @@
 {
   "network": "sepolia",
   "contractName": "ExamRegistry",
-  "contractAddress": "0xa577F1767cCf9e209684d8ced928e26120bb0293",
-  "etherscanUrl": "https://sepolia.etherscan.io/address/0xa577F1767cCf9e209684d8ced928e26120bb0293",
-  "deploymentDate": "2025-01-26",
+  "contractAddress": "0x4A136b4A6E7D207D7e1bA048fA4D06946FF9b81C",
+  "etherscanUrl": "https://sepolia.etherscan.io/address/0x4A136b4A6E7D207D7e1bA048fA4D06946FF9b81C",
+  "deploymentDate": "2026-02-04",
   "compiler": "0.8.20",
   "verified": false,
-  "deployer": "0x93111875c8A3E1243d3144701a8a576020e91904", 
-  "version": "3.0.0-time-locked-fixed",
+  "deployer": "0x93111875c8A3E1243d3144701a8a576020e91904",
+  "version": "4.0.0-sss-two-layer",
   "features": [
-    "Fixed time-locked encryption system",
-    "Authority creates proper time-locked keys during scheduling",
-    "Teacher uploads with raw AES keys",
-    "Authority converts to time-locked during scheduling",
-    "Zero-trust architecture maintained",
-    "Proper unlock timestamp coordination"
+    "Shamir Secret Sharing (SSS) integration",
+    "Two-layer encryption (AES K1 + Master K2)",
+    "Teacher uploads encrypted K1 and shares of K2",
+    "Smart Contract Timelock enforces unlock time",
+    "Zero-trust: Authority cannot decrypt"
   ]
 }
