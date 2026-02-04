@@ -38,7 +38,7 @@ const Dashboard = () => {
                 🛡️
               </div>
               <div>
-                <h1 className="text-2xl font-bold">ChainSeal</h1>
+                <h1 className="text-xl font-bold text-gradient">ZeroLeak</h1>
                 <p className="text-xs text-[hsl(var(--color-text-muted))] uppercase tracking-widest font-semibold">Secure Exam Management</p>
               </div>
             </div>

@@ -65,7 +65,7 @@ const Login = () => {
         <div className="max-w-md mx-auto">
           {/* Logo/Title */}
           <div className="text-center mb-8 animate-fade-in">
-            <h1 className="text-gradient mb-4">ChainSeal</h1>
+            <h1 className="text-gradient mb-4">ZeroLeak</h1>
             <p className="text-[hsl(var(--color-text-secondary))] text-lg">
               Secure Exam Paper Management
             </p>
