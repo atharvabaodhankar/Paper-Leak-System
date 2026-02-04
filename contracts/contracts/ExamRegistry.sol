@@ -17,8 +17,9 @@ contract ExamRegistry {
         bool isScheduled;
         bool isUnlocked;
         address authority;        // Who scheduled it
-        bytes timeLockedKey;      // AES key encrypted with time-lock mechanism
-        string keyDerivationSalt; // Salt for deterministic key derivation
+        bytes encryptedK1;        // K1 (AES key) encrypted with K2 (master key)
+        bytes[] masterKeyShares;  // K2 split into shares using Shamir Secret Sharing
+        uint8 sharesThreshold;    // Minimum shares needed to reconstruct K2
     }
 
     struct Center {
@@ -85,21 +86,25 @@ contract ExamRegistry {
         emit AuthorityRegistered(msg.sender, _name);
     }
 
+
     /**
-     * @dev Teacher uploads a paper with time-locked encryption
-     * The paper is encrypted with a key that can only be derived at unlock time
+     * @dev Teacher uploads a paper with two-layer encryption
+     * K1 (AES key) is encrypted with K2 (master key)
+     * K2 is split into shares using Shamir Secret Sharing
      */
     function uploadPaper(
         string memory _examName,
         string memory _subject,
         string[] memory _ipfsCIDs,
-        bytes memory _timeLockedKey,
-        string memory _keyDerivationSalt
+        bytes memory _encryptedK1,
+        bytes[] memory _masterKeyShares,
+        uint8 _sharesThreshold
     ) external returns (uint256) {
         require(bytes(_examName).length > 0, "Exam name required");
         require(_ipfsCIDs.length > 0, "IPFS CIDs required");
-        require(_timeLockedKey.length > 0, "Time-locked key required");
-        require(bytes(_keyDerivationSalt).length > 0, "Key derivation salt required");
+        require(_encryptedK1.length > 0, "Encrypted K1 required");
+        require(_masterKeyShares.length >= _sharesThreshold, "Not enough shares");
+        require(_sharesThreshold >= 2, "Threshold must be at least 2");
         
         paperCount++;
         
@@ -113,25 +118,25 @@ contract ExamRegistry {
             isScheduled: false,
             isUnlocked: false,
             authority: address(0),
-            timeLockedKey: _timeLockedKey,
-            keyDerivationSalt: _keyDerivationSalt
+            encryptedK1: _encryptedK1,
+            masterKeyShares: _masterKeyShares,
+            sharesThreshold: _sharesThreshold
         });
         
         emit PaperUploaded(paperCount, _examName, msg.sender);
         return paperCount;
     }
     
+    
     /**
-     * @dev Authority schedules an exam for specific centers and updates the time-locked key
-     * Authority cannot decrypt papers - only assigns them to centers with proper time-lock
+     * @dev Authority schedules an exam for specific centers
+     * Authority cannot decrypt papers - encryption is already done by teacher
      */
     function scheduleExam(
         uint256 _paperId,
         uint256 _unlockTimestamp,
         address[] memory _centers,
-        string[] memory _classrooms,
-        bytes memory _newTimeLockedKey,
-        string memory _newSalt
+        string[] memory _classrooms
     ) external onlyAuthority validPaper(_paperId) {
         require(_centers.length == _classrooms.length, "Centers/Classrooms mismatch");
         require(_unlockTimestamp > block.timestamp, "Unlock time must be in future");
@@ -146,9 +151,7 @@ contract ExamRegistry {
             paperAssignments[_paperId][_centers[i]] = true;
         }
         
-        // Update the time-locked key with the proper unlock timestamp
-        paper.timeLockedKey = _newTimeLockedKey;
-        paper.keyDerivationSalt = _newSalt;
+        // Set unlock timestamp
         paper.unlockTimestamp = _unlockTimestamp;
         paper.isScheduled = true;
         paper.authority = msg.sender;
@@ -232,13 +235,15 @@ contract ExamRegistry {
         return paperClassrooms[_paperId][msg.sender];
     }
     
-    // Get time-locked key and salt for decryption (only after unlock time)
-    function getTimeLockedKey(uint256 _paperId) external view validPaper(_paperId) returns (bytes memory, string memory) {
+    /**
+     * @dev Get encrypted K1 and master key shares (only after unlock time)
+     */
+    function getDecryptionShares(uint256 _paperId) external view validPaper(_paperId) returns (bytes memory, bytes[] memory, uint8) {
         Paper memory paper = papers[_paperId];
         require(paper.isUnlocked, "Paper not unlocked yet");
         require(paperAssignments[_paperId][msg.sender], "Not assigned to this paper");
         
-        return (paper.timeLockedKey, paper.keyDerivationSalt);
+        return (paper.encryptedK1, paper.masterKeyShares, paper.sharesThreshold);
     }
     
     function getCenterPublicKey(address _center) external view returns (bytes memory) {
