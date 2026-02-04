@@ -1,4 +1,4 @@
-export const EXAM_REGISTRY_ADDRESS = "0xa577F1767cCf9e209684d8ced928e26120bb0293";
+export const EXAM_REGISTRY_ADDRESS = "0x4A136b4A6E7D207D7e1bA048fA4D06946FF9b81C";
 
 export const EXAM_REGISTRY_ABI = [
   {
@@ -267,6 +267,35 @@ export const EXAM_REGISTRY_ABI = [
         "type": "uint256"
       }
     ],
+    "name": "getDecryptionShares",
+    "outputs": [
+      {
+        "internalType": "bytes",
+        "name": "",
+        "type": "bytes"
+      },
+      {
+        "internalType": "bytes[]",
+        "name": "",
+        "type": "bytes[]"
+      },
+      {
+        "internalType": "uint8",
+        "name": "",
+        "type": "uint8"
+      }
+    ],
+    "stateMutability": "view",
+    "type": "function"
+  },
+  {
+    "inputs": [
+      {
+        "internalType": "uint256",
+        "name": "_paperId",
+        "type": "uint256"
+      }
+    ],
     "name": "getMyClassroom",
     "outputs": [
       {
@@ -337,42 +366,23 @@ export const EXAM_REGISTRY_ABI = [
           },
           {
             "internalType": "bytes",
-            "name": "timeLockedKey",
+            "name": "encryptedK1",
             "type": "bytes"
           },
           {
-            "internalType": "string",
-            "name": "keyDerivationSalt",
-            "type": "string"
+            "internalType": "bytes[]",
+            "name": "masterKeyShares",
+            "type": "bytes[]"
+          },
+          {
+            "internalType": "uint8",
+            "name": "sharesThreshold",
+            "type": "uint8"
           }
         ],
         "internalType": "struct ExamRegistry.Paper",
         "name": "",
         "type": "tuple"
-      }
-    ],
-    "stateMutability": "view",
-    "type": "function"
-  },
-  {
-    "inputs": [
-      {
-        "internalType": "uint256",
-        "name": "_paperId",
-        "type": "uint256"
-      }
-    ],
-    "name": "getTimeLockedKey",
-    "outputs": [
-      {
-        "internalType": "bytes",
-        "name": "",
-        "type": "bytes"
-      },
-      {
-        "internalType": "string",
-        "name": "",
-        "type": "string"
       }
     ],
     "stateMutability": "view",
@@ -515,13 +525,13 @@ export const EXAM_REGISTRY_ABI = [
       },
       {
         "internalType": "bytes",
-        "name": "timeLockedKey",
+        "name": "encryptedK1",
         "type": "bytes"
       },
       {
-        "internalType": "string",
-        "name": "keyDerivationSalt",
-        "type": "string"
+        "internalType": "uint8",
+        "name": "sharesThreshold",
+        "type": "uint8"
       }
     ],
     "stateMutability": "view",
@@ -579,16 +589,6 @@ export const EXAM_REGISTRY_ABI = [
         "internalType": "string[]",
         "name": "_classrooms",
         "type": "string[]"
-      },
-      {
-        "internalType": "bytes",
-        "name": "_newTimeLockedKey",
-        "type": "bytes"
-      },
-      {
-        "internalType": "string",
-        "name": "_newSalt",
-        "type": "string"
       }
     ],
     "name": "scheduleExam",
@@ -628,13 +628,18 @@ export const EXAM_REGISTRY_ABI = [
       },
       {
         "internalType": "bytes",
-        "name": "_timeLockedKey",
+        "name": "_encryptedK1",
         "type": "bytes"
       },
       {
-        "internalType": "string",
-        "name": "_keyDerivationSalt",
-        "type": "string"
+        "internalType": "bytes[]",
+        "name": "_masterKeyShares",
+        "type": "bytes[]"
+      },
+      {
+        "internalType": "uint8",
+        "name": "_sharesThreshold",
+        "type": "uint8"
       }
     ],
     "name": "uploadPaper",
