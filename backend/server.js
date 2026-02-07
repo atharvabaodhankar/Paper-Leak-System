@@ -10,6 +10,9 @@ dotenv.config({ path: '.env.local' });
 
 const app = express();
 
+// Trust proxy (Required for Render/Heroku SSL termination)
+app.set('trust proxy', 1);
+
 // Middleware
 const allowedOrigin = process.env.ALLOWED_ORIGIN || 'http://localhost:5173';
 app.use(cors({
