@@ -107,7 +107,10 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
                                 type="button" 
                                 onClick={() => {
                                     const now = new Date();
-                                    setDate(now.toISOString().split('T')[0]);
+                                    const year = now.getFullYear();
+                                    const month = String(now.getMonth() + 1).padStart(2, '0');
+                                    const day = String(now.getDate()).padStart(2, '0');
+                                    setDate(`${year}-${month}-${day}`);
                                 }}
                                 className="text-[10px] text-primary hover:text-primary/80 transition-colors"
                             >
@@ -139,6 +142,7 @@ const ScheduleExamModal = ({ paper, onClose, onSchedule }) => {
                                 type="button" 
                                 onClick={() => {
                                     const now = new Date();
+                                    now.setMinutes(now.getMinutes() + 15); // Add 15 mins buffer
                                     const hours = String(now.getHours()).padStart(2, '0');
                                     const minutes = String(now.getMinutes()).padStart(2, '0');
                                     setTime(`${hours}:${minutes}`);
