@@ -20,12 +20,8 @@ const Login = () => {
     }
   }, [isAuthenticated, navigate]);
 
-  // Auto-login when wallet connects
-  useEffect(() => {
-    if (account && isConnected) {
-      handleLogin();
-    }
-  }, [account, isConnected]);
+  // Auto-login handled globally by useAutoLogin hook in App.jsx
+  // Removed local useEffect to prevent double login attempts
 
   const handleConnectWallet = async () => {
     setError('');
