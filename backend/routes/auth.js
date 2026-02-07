@@ -117,8 +117,8 @@ router.post('/verify', async (req, res) => {
     const cookieOptions = {
       expires: new Date(Date.now() + (parseInt(process.env.JWT_COOKIE_EXPIRE) || 30) * 24 * 60 * 60 * 1000),
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict'
+      secure: true, // Always true for cross-site
+      sameSite: 'none' // Required for cross-site
     };
 
     res.cookie('token', token, cookieOptions);
@@ -225,7 +225,9 @@ router.get('/me', protect, async (req, res) => {
 router.post('/logout', protect, (req, res) => {
   res.cookie('token', 'none', {
     expires: new Date(Date.now() + 10 * 1000),
-    httpOnly: true
+    httpOnly: true,
+    secure: true,
+    sameSite: 'none'
   });
 
   res.status(200).json({
